@@ -1,0 +1,59 @@
+[general]
+hotkey = "ctrl+shift+space"
+command_hotkey = "ctrl+shift+c"
+mode = "toggle"                    # "toggle" or "push_to_talk"
+auto_start = false
+start_minimized = true
+theme = "dark"                     # "dark", "light", "system"
+
+[stt]
+engine = "deepgram"                # "deepgram", "whisper_local", "openai", "groq"
+language = "auto"                  # "auto", "en", "hi", "es", etc.
+deepgram_api_key = ""
+openai_api_key = ""
+groq_api_key = ""                  # Free: https://console.groq.com (30 req/min)
+
+[stt.deepgram]
+model = "nova-3"
+smart_format = true
+interim_results = true
+filler_words = false
+
+[stt.whisper]
+model_size = "small"               # "tiny", "base", "small", "medium", "large-v3"
+device = "auto"                    # "auto", "cpu", "cuda"
+compute_type = "int8"
+
+[polishing]
+enabled = true
+provider = "groq"                  # "groq", "gemini", "ollama", "openai", "anthropic", "none"
+openai_api_key = ""
+anthropic_api_key = ""
+groq_api_key = ""                  # Free: https://console.groq.com (30 req/min)
+gemini_api_key = ""                # Free: https://aistudio.google.com/apikey (15 req/min)
+ollama_model = "llama3.2"
+ollama_url = "http://localhost:11434"
+context_aware = true
+
+[audio]
+input_device = "default"
+sample_rate = 16000
+noise_gate_threshold = 0.01
+vad_sensitivity = 0.5
+save_audio = false
+
+[ui]
+bar_position = "top_center"        # "top_left", "top_center", "top_right", "bottom_center"
+bar_opacity = 0.95
+show_interim_results = true
+font_size = 14
+notification_sounds = true
+
+[history]
+enabled = true
+max_entries = 10000
+auto_cleanup_days = 90
+
+[snippets]
+# Voice-triggered text expansions
+# "trigger phrase" = "expansion text"

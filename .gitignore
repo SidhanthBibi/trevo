@@ -1,0 +1,40 @@
+# API keys — NEVER commit real config
+config.toml
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+dist/
+build/
+*.egg
+.eggs/
+venv/
+.venv/
+env/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# OS
+Thumbs.db
+.DS_Store
+
+# Logs
+logs/
+*.log
+
+# PyInstaller
+*.spec
+
+# Local data
+*.db
+installer_output/
+voices/
+
+# Claude Code
+.claude/
