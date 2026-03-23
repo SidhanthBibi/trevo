@@ -5,12 +5,14 @@ from loguru import logger
 
 def setup_logger(log_level: str = "INFO") -> None:
     logger.remove()
-    logger.add(
-        sys.stderr,
-        level=log_level,
-        format="<green>{time:HH:mm:ss}</green> | <level>{level: <8}</level> | <cyan>{name}</cyan>:<cyan>{function}</cyan> - <level>{message}</level>",
-        colorize=True,
-    )
+    # sys.stderr is None when running as --windowed PyInstaller bundle
+    if sys.stderr is not None:
+        logger.add(
+            sys.stderr,
+            level=log_level,
+            format="<green>{time:HH:mm:ss}</green> | <level>{level: <8}</level> | <cyan>{name}</cyan>:<cyan>{function}</cyan> - <level>{message}</level>",
+            colorize=True,
+        )
     log_dir = Path.home() / "AppData" / "Local" / "trevo" / "logs"
     log_dir.mkdir(parents=True, exist_ok=True)
     logger.add(
