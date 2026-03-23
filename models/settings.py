@@ -50,14 +50,6 @@ class GeneralSettings:
 
 
 @dataclass
-class DeepgramSettings:
-    model: str = "nova-3"
-    smart_format: bool = True
-    interim_results: bool = True
-    filler_words: bool = False
-
-
-@dataclass
 class WhisperSettings:
     model_size: str = "small"
     device: str = "auto"
@@ -66,14 +58,12 @@ class WhisperSettings:
 
 @dataclass
 class STTSettings:
-    engine: str = "deepgram"
+    engine: str = "groq"
     language: str = "auto"
-    deepgram_api_key: str = ""
     openai_api_key: str = ""
     groq_api_key: str = ""
     gemini_api_key: str = ""
     google_cloud_api_key: str = ""
-    deepgram: DeepgramSettings = field(default_factory=DeepgramSettings)
     whisper: WhisperSettings = field(default_factory=WhisperSettings)
 
 
@@ -88,6 +78,20 @@ class PolishingSettings:
     ollama_model: str = "llama3.2"
     ollama_url: str = "http://localhost:11434"
     context_aware: bool = True
+
+
+@dataclass
+class TTSSettings:
+    provider: str = "google_cloud"  # "google_cloud", "gtts", "pyttsx3"
+    google_cloud_api_key: str = ""
+    voice: str = "en-US-Wavenet-D"
+    language: str = "en-US"
+    speaking_rate: float = 1.0
+
+
+@dataclass
+class KnowledgeSettings:
+    vault_path: str = ""
 
 
 @dataclass
@@ -126,10 +130,12 @@ class Settings:
     general: GeneralSettings = field(default_factory=GeneralSettings)
     stt: STTSettings = field(default_factory=STTSettings)
     polishing: PolishingSettings = field(default_factory=PolishingSettings)
+    tts: TTSSettings = field(default_factory=TTSSettings)
     audio: AudioSettings = field(default_factory=AudioSettings)
     ui: UISettings = field(default_factory=UISettings)
     history: HistorySettings = field(default_factory=HistorySettings)
     snippets: Dict[str, str] = field(default_factory=dict)
+    knowledge: KnowledgeSettings = field(default_factory=KnowledgeSettings)
 
     # ------------------------------------------------------------------
     # Loading
@@ -157,39 +163,48 @@ class Settings:
                 try:
                     with open(candidate, "rb") as f:
                         data = tomli.load(f)
-                    return cls._from_dict(data)
+                    settings = cls._from_dict(data)
+                    # Default vault_path to ~/trevo-vault if empty
+                    if not settings.knowledge.vault_path:
+                        settings.knowledge.vault_path = str(Path.home() / "trevo-vault")
+                    return settings
                 except Exception:
                     logger.exception("Failed to load settings from {}", candidate)
 
         logger.info("No config file found — using defaults")
-        return cls()
+        settings = cls()
+        if not settings.knowledge.vault_path:
+            settings.knowledge.vault_path = str(Path.home() / "trevo-vault")
+        return settings
 
     @classmethod
     def _from_dict(cls, data: dict[str, Any]) -> Settings:
         general_data = data.get("general", {})
         stt_data = data.get("stt", {})
         polishing_data = data.get("polishing", {})
+        tts_data = data.get("tts", {})
         audio_data = data.get("audio", {})
         ui_data = data.get("ui", {})
         history_data = data.get("history", {})
         snippets_data = data.get("snippets", {})
+        knowledge_data = data.get("knowledge", {})
 
         # STT has nested sub-tables
-        deepgram_data = stt_data.pop("deepgram", {})
         whisper_data = stt_data.pop("whisper", {})
 
         return cls(
             general=GeneralSettings(**{k: v for k, v in general_data.items() if k in GeneralSettings.__dataclass_fields__}),
             stt=STTSettings(
-                **{k: v for k, v in stt_data.items() if k in STTSettings.__dataclass_fields__ and k not in ("deepgram", "whisper")},
-                deepgram=DeepgramSettings(**{k: v for k, v in deepgram_data.items() if k in DeepgramSettings.__dataclass_fields__}),
+                **{k: v for k, v in stt_data.items() if k in STTSettings.__dataclass_fields__ and k != "whisper"},
                 whisper=WhisperSettings(**{k: v for k, v in whisper_data.items() if k in WhisperSettings.__dataclass_fields__}),
             ),
             polishing=PolishingSettings(**{k: v for k, v in polishing_data.items() if k in PolishingSettings.__dataclass_fields__}),
+            tts=TTSSettings(**{k: v for k, v in tts_data.items() if k in TTSSettings.__dataclass_fields__}),
             audio=AudioSettings(**{k: v for k, v in audio_data.items() if k in AudioSettings.__dataclass_fields__}),
             ui=UISettings(**{k: v for k, v in ui_data.items() if k in UISettings.__dataclass_fields__}),
             history=HistorySettings(**{k: v for k, v in history_data.items() if k in HistorySettings.__dataclass_fields__}),
             snippets=dict(snippets_data),
+            knowledge=KnowledgeSettings(**{k: v for k, v in knowledge_data.items() if k in KnowledgeSettings.__dataclass_fields__}),
         )
 
     # ------------------------------------------------------------------
@@ -219,12 +234,10 @@ class Settings:
         stt_dict = {
             "engine": self.stt.engine,
             "language": self.stt.language,
-            "deepgram_api_key": self.stt.deepgram_api_key,
             "openai_api_key": self.stt.openai_api_key,
             "groq_api_key": self.stt.groq_api_key,
             "gemini_api_key": self.stt.gemini_api_key,
             "google_cloud_api_key": self.stt.google_cloud_api_key,
-            "deepgram": asdict(self.stt.deepgram),
             "whisper": asdict(self.stt.whisper),
         }
 
@@ -232,10 +245,12 @@ class Settings:
             "general": asdict(self.general),
             "stt": stt_dict,
             "polishing": asdict(self.polishing),
+            "tts": asdict(self.tts),
             "audio": asdict(self.audio),
             "ui": asdict(self.ui),
             "history": asdict(self.history),
             "snippets": dict(self.snippets),
+            "knowledge": asdict(self.knowledge),
         }
 
     # ------------------------------------------------------------------

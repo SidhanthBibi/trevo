@@ -11,7 +11,7 @@ Built with Python 3.11+ and PyQt6. Windows-first, with cross-platform planned.
 ## Features
 
 - **Voice-to-Text** — Speak naturally, get polished text pasted into any app
-- **6 STT Engines** — Groq (free), Deepgram, OpenAI, Gemini, Google Cloud, faster-whisper (offline)
+- **5 STT Engines** — Groq (free), Gemini (free), Google Cloud, OpenAI, faster-whisper (offline)
 - **AI Text Polishing** — Grammar, punctuation, formatting via Groq/Gemini/Ollama/OpenAI/Anthropic
 - **Trevo Mode** — JARVIS-style 3D particle sphere with voice interaction ("Wake up daddy's home")
 - **Conversation Engine** — Intent detection: dictate, instruct, edit, meta, conversation
@@ -152,7 +152,6 @@ trevo/
 │   ├── audio_capture.py    # Microphone capture with sounddevice
 │   ├── vad.py              # Voice Activity Detection
 │   ├── stt_engine.py       # STT base class
-│   ├── stt_deepgram.py     # Deepgram Nova-3 (streaming)
 │   ├── stt_groq.py         # Groq Whisper (free)
 │   ├── stt_openai.py       # OpenAI Whisper API
 │   ├── stt_gemini.py       # Gemini multimodal STT
@@ -218,7 +217,7 @@ hotkey = "ctrl+shift+space"
 theme = "dark"
 
 [stt]
-engine = "groq"                    # groq, deepgram, whisper_local, openai, gemini, google_cloud
+engine = "groq"                    # groq, gemini, google_cloud, openai, whisper_local
 groq_api_key = "gsk_..."          # Free at console.groq.com
 
 [polishing]

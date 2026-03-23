@@ -204,11 +204,10 @@ class SettingsDialog(QDialog):
 
         self._engine_combo = QComboBox()
         self._engine_combo.addItem("Groq Whisper (Free)", "groq")
-        self._engine_combo.addItem("Deepgram Nova-3", "deepgram")
-        self._engine_combo.addItem("Whisper (Local)", "whisper_local")
-        self._engine_combo.addItem("OpenAI Whisper", "openai")
         self._engine_combo.addItem("Gemini (Free)", "gemini")
         self._engine_combo.addItem("Google Cloud STT", "google_cloud")
+        self._engine_combo.addItem("OpenAI Whisper", "openai")
+        self._engine_combo.addItem("Whisper (Local)", "whisper_local")
         self._engine_combo.currentIndexChanged.connect(self._on_engine_changed)
         eg.addRow("STT engine:", self._engine_combo)
 
@@ -225,16 +224,6 @@ class SettingsDialog(QDialog):
         self._groq_stt_key.setPlaceholderText("Free: console.groq.com")
         kg.addRow("Groq:", self._groq_stt_key)
 
-        self._deepgram_key = QLineEdit()
-        self._deepgram_key.setEchoMode(QLineEdit.EchoMode.Password)
-        self._deepgram_key.setPlaceholderText("Deepgram API key")
-        kg.addRow("Deepgram:", self._deepgram_key)
-
-        self._openai_stt_key = QLineEdit()
-        self._openai_stt_key.setEchoMode(QLineEdit.EchoMode.Password)
-        self._openai_stt_key.setPlaceholderText("OpenAI API key")
-        kg.addRow("OpenAI:", self._openai_stt_key)
-
         self._gemini_stt_key = QLineEdit()
         self._gemini_stt_key.setEchoMode(QLineEdit.EchoMode.Password)
         self._gemini_stt_key.setPlaceholderText("Free: aistudio.google.com/apikey")
@@ -244,6 +233,11 @@ class SettingsDialog(QDialog):
         self._google_cloud_stt_key.setEchoMode(QLineEdit.EchoMode.Password)
         self._google_cloud_stt_key.setPlaceholderText("Google Cloud API key")
         kg.addRow("Google Cloud:", self._google_cloud_stt_key)
+
+        self._openai_stt_key = QLineEdit()
+        self._openai_stt_key.setEchoMode(QLineEdit.EchoMode.Password)
+        self._openai_stt_key.setPlaceholderText("OpenAI API key")
+        kg.addRow("OpenAI:", self._openai_stt_key)
 
         outer.addWidget(keys_group)
 
@@ -536,10 +530,9 @@ class SettingsDialog(QDialog):
         # Manually trigger engine change handler in case index didn't change
         self._on_engine_changed(self._engine_combo.currentIndex())
         self._groq_stt_key.setText(s.get("groq_stt_api_key", ""))
-        self._deepgram_key.setText(s.get("deepgram_api_key", ""))
-        self._openai_stt_key.setText(s.get("openai_api_key", ""))
         self._gemini_stt_key.setText(s.get("gemini_stt_api_key", ""))
         self._google_cloud_stt_key.setText(s.get("google_cloud_stt_api_key", ""))
+        self._openai_stt_key.setText(s.get("openai_api_key", ""))
         model_idx = self._stt_model_combo.findText(
             s.get("stt_model", "nova-3"), Qt.MatchFlag.MatchFixedString
         )
@@ -606,10 +599,9 @@ class SettingsDialog(QDialog):
             # Speech Engine
             "stt_engine": self._engine_combo.currentData() or self._engine_combo.currentText(),
             "groq_stt_api_key": self._groq_stt_key.text(),
-            "deepgram_api_key": self._deepgram_key.text(),
-            "openai_api_key": self._openai_stt_key.text(),
             "gemini_stt_api_key": self._gemini_stt_key.text(),
             "google_cloud_stt_api_key": self._google_cloud_stt_key.text(),
+            "openai_api_key": self._openai_stt_key.text(),
             "stt_model": self._stt_model_combo.currentText(),
             "stt_language": self._stt_language.currentText(),
             # AI Polishing
@@ -649,10 +641,9 @@ class SettingsDialog(QDialog):
         engine = self._engine_combo.currentData()
         # Show/hide relevant key fields based on engine
         self._groq_stt_key.setEnabled(engine == "groq")
-        self._deepgram_key.setEnabled(engine == "deepgram")
-        self._openai_stt_key.setEnabled(engine == "openai")
         self._gemini_stt_key.setEnabled(engine == "gemini")
         self._google_cloud_stt_key.setEnabled(engine == "google_cloud")
+        self._openai_stt_key.setEnabled(engine == "openai")
 
     def _on_provider_changed(self, _index: int) -> None:
         """Update model suggestions based on provider selection."""

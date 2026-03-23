@@ -137,11 +137,20 @@ def get_transcript_history(limit: int = 20) -> list[dict]:
 
 @mcp.tool()
 def get_settings() -> dict:
-    """Get the full trevo settings as a dictionary."""
+    """Get the full trevo settings as a dictionary (API keys redacted)."""
     try:
         from models.settings import Settings
         settings = Settings.load()
-        return settings._to_dict()
+        data = settings._to_dict()
+        # Redact API keys — never expose secrets over MCP
+        for section in data.values():
+            if isinstance(section, dict):
+                for key in list(section.keys()):
+                    if "api_key" in key or "secret" in key:
+                        val = section[key]
+                        if isinstance(val, str) and val:
+                            section[key] = val[:4] + "****" + val[-4:] if len(val) > 8 else "****"
+        return data
     except Exception as exc:
         return {"error": f"Failed to load settings: {exc}"}
 

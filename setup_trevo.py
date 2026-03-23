@@ -204,7 +204,7 @@ def step3_install_deps():
             "loguru>=0.7.0", "httpx>=0.27.0", "tomli>=2.0.0",
         ],
         "API Clients": [
-            "deepgram-sdk>=4.5.0", "openai>=1.30.0", "anthropic>=0.25.0",
+            "openai>=1.30.0", "anthropic>=0.25.0",
         ],
         "TTS": [
             "gTTS>=2.3.0", "pyttsx3>=2.90",
@@ -247,7 +247,8 @@ def step3_install_deps():
         print("\n      [OK] All packages installed successfully!")
 
     # Optional: offline STT (large download, ask first)
-    print("\n      Offline STT requires torch + faster-whisper (~2GB download)")
+    print("\n      Offline STT requires torch + faster-whisper (~2-4 GB download)")
+    print("      NOTE: This is a very large download and is only needed for offline mode.")
     resp = input("      Install offline mode? [y/N]: ").strip().lower()
     if resp == "y":
         print("      Downloading torch + faster-whisper (this may take a while)...")
@@ -294,9 +295,8 @@ def step4_setup_api_keys():
            Then run: ollama pull llama3.2
 
       OPTIONAL (Paid / Subscription):
-        D. Deepgram — Cloud STT ($0.0043/min, $200 free credit)
-        E. OpenAI   — Cloud STT + LLM (or use ChatGPT Plus plan)
-        F. Anthropic — Cloud LLM (or use Claude Pro plan)
+        D. OpenAI   — Cloud STT + LLM (or use ChatGPT Plus plan)
+        E. Anthropic — Cloud LLM (or use Claude Pro plan)
 
       TIP: If you have Claude Pro or ChatGPT Plus, you can use those
       subscriptions instead of API keys — see README for details.
@@ -308,8 +308,6 @@ def step4_setup_api_keys():
     groq_key = input("      Enter Groq API key (FREE — recommended, or Enter to skip): ").strip()
     if groq_key:
         config_text = config_text.replace('groq_api_key = ""', f'groq_api_key = "{groq_key}"')
-        config_text = config_text.replace('engine = "deepgram"', 'engine = "groq"')
-        config_text = config_text.replace('provider = "openai"', 'provider = "groq"')
         print("      [OK] Groq key saved (STT + AI polishing)")
 
     # Gemini key
@@ -317,14 +315,8 @@ def step4_setup_api_keys():
     if gemini_key:
         config_text = config_text.replace('gemini_api_key = ""', f'gemini_api_key = "{gemini_key}"')
         if not groq_key:
-            config_text = config_text.replace('provider = "openai"', 'provider = "gemini"')
+            config_text = config_text.replace('provider = "groq"', 'provider = "gemini"')
         print("      [OK] Gemini key saved")
-
-    # Deepgram key
-    dg_key = input("      Enter Deepgram API key (optional, or Enter to skip): ").strip()
-    if dg_key:
-        config_text = config_text.replace('deepgram_api_key = ""', f'deepgram_api_key = "{dg_key}"', 1)
-        print("      [OK] Deepgram key saved")
 
     # OpenAI key
     oai_key = input("      Enter OpenAI API key (optional, or Enter to skip): ").strip()
@@ -358,9 +350,9 @@ def step4_setup_api_keys():
         config_text += f'\n[knowledge]\nvault_path = "{vault_path}"\n'
 
     # If no cloud keys at all, switch to offline mode
-    if not groq_key and not dg_key and not oai_key:
+    if not groq_key and not oai_key:
         print("\n      No cloud STT key provided — switching to offline (whisper_local) mode")
-        config_text = config_text.replace('engine = "deepgram"', 'engine = "whisper_local"')
+        config_text = config_text.replace('engine = "groq"', 'engine = "whisper_local"')
         if not groq_key and not gemini_key and not oai_key and not ant_key:
             config_text = config_text.replace('provider = "groq"', 'provider = "ollama"')
 
@@ -426,9 +418,16 @@ if errors:
     sys.exit(1)
 else:
     print("\\n      All required packages OK!")
+    sys.exit(0)
 """.format(root=str(ROOT).replace("\\", "\\\\"))
 
-    _run([py, "-c", test_code])
+    try:
+        result = _run([py, "-c", test_code])
+        if result.returncode != 0:
+            print("      [!] Verification encountered issues (see above)")
+    except Exception as e:
+        print(f"      [!] Verification failed: {e}")
+        print("      The app may still work — try running it.")
 
 
 def step6_launch():
@@ -465,8 +464,14 @@ def step6_launch():
     resp = input("      Launch trevo now? [Y/n]: ").strip().lower()
     if resp != "n":
         print("      Starting trevo...")
-        subprocess.Popen([py, str(ROOT / "main.py")])
-        print("      [OK] trevo is running in the system tray!")
+        launch_cmd = [py, str(ROOT / "main.py")]
+        print(f"      Command: {' '.join(launch_cmd)}")
+        try:
+            subprocess.Popen(launch_cmd)
+            print("      [OK] trevo is running in the system tray!")
+        except Exception as e:
+            print(f"      [!] Failed to launch trevo: {e}")
+            print(f"      Run manually with: {py} main.py")
     else:
         print(f"      Run later with: {py} main.py")
 
@@ -482,6 +487,8 @@ def main():
     step4_setup_api_keys()
     step5_verify()
     step6_launch()
+
+    input("\n      Press Enter to exit...")
 
 
 if __name__ == "__main__":

@@ -156,6 +156,10 @@ class TrevoApp(QObject):
             api_key = self._settings.polishing.openai_api_key or self._settings.stt.openai_api_key
         elif provider == "anthropic":
             api_key = self._settings.polishing.anthropic_api_key
+        elif provider == "groq":
+            api_key = self._settings.polishing.groq_api_key
+        elif provider == "gemini":
+            api_key = self._settings.polishing.gemini_api_key
 
         self._text_polisher = TextPolisher(
             provider=provider if provider != "none" else "openai",
@@ -249,18 +253,11 @@ class TrevoApp(QObject):
             from core.stt_google import GoogleCloudSTT
             return GoogleCloudSTT(api_key=self._settings.stt.google_cloud_api_key)
 
-        # Default / deepgram
-        try:
-            from core.stt_deepgram import DeepgramSTT  # type: ignore[import-not-found]
-
-            return DeepgramSTT(api_key=self._settings.stt.deepgram_api_key)
-        except ImportError:
-            logger.warning(
-                "Deepgram STT module not found; falling back to whisper_local",
-            )
-            from core.stt_whisper import WhisperLocalSTT
-
-            return WhisperLocalSTT()
+        # Unknown engine
+        raise ValueError(
+            f"Unknown STT engine: {engine_name}. "
+            f"Supported: groq, gemini, google_cloud, openai, whisper_local"
+        )
 
     # ------------------------------------------------------------------
     # Signal wiring

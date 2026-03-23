@@ -681,16 +681,36 @@ def run_system_command(command: str) -> AutomationResult:
     Only allows a curated set of safe, read-only commands.
     Anything else requires confirmation.
     """
-    # Whitelist of safe commands (read-only)
-    _SAFE_PREFIXES = (
+    import shlex
+    import re
+
+    # Reject shell metacharacters to prevent command chaining
+    _SHELL_META = re.compile(r'[;&|`$(){}\[\]<>!]')
+    if _SHELL_META.search(command):
+        return AutomationResult(
+            success=False,
+            output=f"Command contains disallowed shell characters: {command}",
+            risk=RiskLevel.HIGH,
+            requires_confirmation=True,
+            metadata={"command": command, "action": "run_command"},
+        )
+
+    # Whitelist of safe commands (read-only, exact first token match)
+    _SAFE_COMMANDS = {
         "echo", "hostname", "whoami", "date", "time",
         "systeminfo", "ipconfig", "dir", "type", "where",
-        "python --version", "node --version", "git --version",
-        "git status", "git log", "git branch", "git diff",
-    )
+        "python", "node", "git",
+    }
 
-    cmd_lower = command.strip().lower()
-    is_safe = any(cmd_lower.startswith(prefix) for prefix in _SAFE_PREFIXES)
+    try:
+        parts = shlex.split(command)
+    except ValueError:
+        return AutomationResult(
+            success=False, error="Could not parse command", risk=RiskLevel.HIGH,
+        )
+
+    cmd_name = Path(parts[0]).stem.lower() if parts else ""
+    is_safe = cmd_name in _SAFE_COMMANDS
 
     if not is_safe:
         return AutomationResult(
@@ -705,8 +725,8 @@ def run_system_command(command: str) -> AutomationResult:
 
     try:
         result = subprocess.run(
-            command,
-            shell=True,
+            parts,
+            shell=False,
             capture_output=True,
             text=True,
             timeout=30,
@@ -734,12 +754,19 @@ def run_system_command(command: str) -> AutomationResult:
 
 def run_system_command_confirmed(command: str) -> AutomationResult:
     """Run a system command after user confirmation (bypasses whitelist)."""
+    import shlex
+
     logger.info("Running confirmed command: {}", command)
 
     try:
+        parts = shlex.split(command)
+    except ValueError:
+        return AutomationResult(success=False, error="Could not parse command")
+
+    try:
         result = subprocess.run(
-            command,
-            shell=True,
+            parts,
+            shell=False,
             capture_output=True,
             text=True,
             timeout=60,

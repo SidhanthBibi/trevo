@@ -38,3 +38,7 @@ voices/
 
 # Claude Code
 .claude/
+
+# Test artifacts
+test/
+tests/__pycache__/

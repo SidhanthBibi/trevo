@@ -1,6 +1,6 @@
 # trevo — Failure & Dead Code Audit
 
-> Generated: 2026-03-23 | Updated: 2026-03-23
+> Generated: 2026-03-23 | Updated: 2026-03-23 (v1.0.1)
 > Audit of all integration gaps, dead code, known bugs, and security issues
 
 ---
@@ -111,13 +111,22 @@
 
 ### 20. `core/desktop_automation.py` — run_system_command uses shell=True
 - **Severity**: MEDIUM (mitigated by whitelist + confirmation flow)
-- **Issue**: `run_system_command()` and `run_system_command_confirmed()` still use `shell=True`
-- **Mitigation**: Whitelist check + user confirmation required for non-whitelisted commands
-- **Fix needed**: Parse commands into list args where possible
+- **Issue**: `run_system_command()` and `run_system_command_confirmed()` used `shell=True`
+- **Status**: FIXED in v1.0.1 — now uses `shlex.split()` + `shell=False`, rejects shell metacharacters
 
 ### 21. API keys stored in plaintext config.toml
 - **Severity**: LOW (local file, in .gitignore)
 - **Fix needed**: Windows Credential Store integration (Phase 3)
+
+### 22. MCP server exposed raw API keys
+- **Severity**: MEDIUM
+- **Issue**: `get_settings()` MCP tool returned full API keys to any connected client
+- **Status**: FIXED in v1.0.1 — API keys now redacted in response
+
+### 23. Deepgram dependency removed
+- **Severity**: INFO
+- **Issue**: Deepgram was a paid service that most users don't need
+- **Status**: REMOVED in v1.0.1 — Groq (free) is now the default STT engine
 
 ---
 

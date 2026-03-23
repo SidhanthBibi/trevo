@@ -7,17 +7,12 @@ start_minimized = true
 theme = "dark"                     # "dark", "light", "system"
 
 [stt]
-engine = "deepgram"                # "deepgram", "whisper_local", "openai", "groq"
+engine = "groq"                    # "groq", "gemini", "google_cloud", "openai", "whisper_local"
 language = "auto"                  # "auto", "en", "hi", "es", etc.
-deepgram_api_key = ""
 openai_api_key = ""
-groq_api_key = ""                  # Free: https://console.groq.com (30 req/min)
-
-[stt.deepgram]
-model = "nova-3"
-smart_format = true
-interim_results = true
-filler_words = false
+groq_api_key = ""                  # Free: https://console.groq.com
+gemini_api_key = ""                # Free: https://aistudio.google.com/apikey
+google_cloud_api_key = ""
 
 [stt.whisper]
 model_size = "small"               # "tiny", "base", "small", "medium", "large-v3"
@@ -34,6 +29,13 @@ gemini_api_key = ""                # Free: https://aistudio.google.com/apikey (1
 ollama_model = "llama3.2"
 ollama_url = "http://localhost:11434"
 context_aware = true
+
+[tts]
+provider = "google_cloud"          # "google_cloud", "gtts", "pyttsx3"
+google_cloud_api_key = ""
+voice = "en-US-Wavenet-D"
+language = "en-US"
+speaking_rate = 1.0
 
 [audio]
 input_device = "default"
@@ -57,3 +59,6 @@ auto_cleanup_days = 90
 [snippets]
 # Voice-triggered text expansions
 # "trigger phrase" = "expansion text"
+
+[knowledge]
+vault_path = ""                    # Default: ~/trevo-vault

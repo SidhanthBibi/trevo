@@ -85,7 +85,7 @@ var
   APIKeysPage: TWizardPage;
   GroqKeyEdit: TNewEdit;
   GeminiKeyEdit: TNewEdit;
-  DeepgramKeyEdit: TNewEdit;
+  GCloudKeyEdit: TNewEdit;
   OpenAIKeyEdit: TNewEdit;
   AnthropicKeyEdit: TNewEdit;
 
@@ -99,9 +99,10 @@ function GetSpeechEngineValue(): string;
 begin
   case SpeechEngineCombo.ItemIndex of
     0: Result := 'groq';
-    1: Result := 'deepgram';
-    2: Result := 'whisper_local';
-    3: Result := 'openai';
+    1: Result := 'gemini';
+    2: Result := 'google_cloud';
+    3: Result := 'whisper_local';
+    4: Result := 'openai';
   else
     Result := 'groq';
   end;
@@ -129,14 +130,18 @@ begin
          'Fast cloud-based transcription powered by Whisper.'#13#10 +
          'Sign up at: https://console.groq.com';
     1: SpeechEngineDescLabel.Caption :=
-         'Deepgram - Paid service with excellent accuracy.'#13#10 +
-         'Real-time streaming with interim results.'#13#10 +
-         'Sign up at: https://console.deepgram.com';
+         'Gemini (Free) - Google AI, 15 requests/min free tier.'#13#10 +
+         'Good quality speech recognition.'#13#10 +
+         'Get key at: https://aistudio.google.com/apikey';
     2: SpeechEngineDescLabel.Caption :=
+         'Google Cloud STT - Paid, high accuracy.'#13#10 +
+         'Requires a Google Cloud API key with billing enabled.'#13#10 +
+         'Sign up at: https://console.cloud.google.com';
+    3: SpeechEngineDescLabel.Caption :=
          'Whisper Local - Runs entirely on your machine.'#13#10 +
          'No API key needed. Requires ~1-4 GB RAM.'#13#10 +
          'Slower than cloud options but fully private.';
-    3: SpeechEngineDescLabel.Caption :=
+    4: SpeechEngineDescLabel.Caption :=
          'OpenAI Whisper API - Paid, high quality.'#13#10 +
          'Requires an OpenAI API key with billing enabled.'#13#10 +
          'Sign up at: https://platform.openai.com';
@@ -209,7 +214,8 @@ begin
   SpeechEngineCombo.Width := 350;
   SpeechEngineCombo.Style := csDropDownList;
   SpeechEngineCombo.Items.Add('Groq  (Free — Recommended)');
-  SpeechEngineCombo.Items.Add('Deepgram  (Paid — Streaming)');
+  SpeechEngineCombo.Items.Add('Gemini  (Free — Google AI)');
+  SpeechEngineCombo.Items.Add('Google Cloud STT  (Paid)');
   SpeechEngineCombo.Items.Add('Whisper Local  (Free — Offline)');
   SpeechEngineCombo.Items.Add('OpenAI Whisper API  (Paid)');
   SpeechEngineCombo.ItemIndex := 0;
@@ -311,20 +317,20 @@ begin
   GeminiKeyEdit.Text := '';
   TopPos := TopPos + 36;
 
-  // --- Deepgram (optional) ---
+  // --- Google Cloud (optional) ---
   L := TNewStaticText.Create(APIKeysPage);
   L.Parent := APIKeysPage.Surface;
-  L.Caption := 'Deepgram API Key  (Optional — https://console.deepgram.com)';
+  L.Caption := 'Google Cloud API Key  (Optional — https://console.cloud.google.com)';
   L.Top := TopPos;
   L.Left := 0;
   TopPos := TopPos + 20;
 
-  DeepgramKeyEdit := TNewEdit.Create(APIKeysPage);
-  DeepgramKeyEdit.Parent := APIKeysPage.Surface;
-  DeepgramKeyEdit.Top := TopPos;
-  DeepgramKeyEdit.Left := 0;
-  DeepgramKeyEdit.Width := APIKeysPage.SurfaceWidth;
-  DeepgramKeyEdit.Text := '';
+  GCloudKeyEdit := TNewEdit.Create(APIKeysPage);
+  GCloudKeyEdit.Parent := APIKeysPage.Surface;
+  GCloudKeyEdit.Top := TopPos;
+  GCloudKeyEdit.Left := 0;
+  GCloudKeyEdit.Width := APIKeysPage.SurfaceWidth;
+  GCloudKeyEdit.Text := '';
   TopPos := TopPos + 36;
 
   // --- OpenAI (optional) ---
@@ -438,18 +444,10 @@ begin
     Lines.Add('[stt]');
     Lines.Add('engine = "' + Engine + '"');
     Lines.Add('language = "auto"');
-    Lines.Add('deepgram_api_key = "' + DeepgramKeyEdit.Text + '"');
     Lines.Add('openai_api_key = "' + OpenAIKeyEdit.Text + '"');
     Lines.Add('groq_api_key = "' + GroqKeyEdit.Text + '"');
     Lines.Add('gemini_api_key = "' + GeminiKeyEdit.Text + '"');
-    Lines.Add('google_cloud_api_key = ""');
-    Lines.Add('');
-
-    Lines.Add('[stt.deepgram]');
-    Lines.Add('model = "nova-3"');
-    Lines.Add('smart_format = true');
-    Lines.Add('interim_results = true');
-    Lines.Add('filler_words = false');
+    Lines.Add('google_cloud_api_key = "' + GCloudKeyEdit.Text + '"');
     Lines.Add('');
 
     Lines.Add('[stt.whisper]');
@@ -468,6 +466,14 @@ begin
     Lines.Add('ollama_model = "llama3.2"');
     Lines.Add('ollama_url = "http://localhost:11434"');
     Lines.Add('context_aware = true');
+    Lines.Add('');
+
+    Lines.Add('[tts]');
+    Lines.Add('provider = "google_cloud"');
+    Lines.Add('google_cloud_api_key = "' + GCloudKeyEdit.Text + '"');
+    Lines.Add('voice = "en-US-Wavenet-D"');
+    Lines.Add('language = "en-US"');
+    Lines.Add('speaking_rate = 1.0');
     Lines.Add('');
 
     Lines.Add('[audio]');
@@ -536,10 +542,19 @@ begin
       ) = IDNO then
         Result := False;
     end
-    else if (Engine = 'deepgram') and (DeepgramKeyEdit.Text = '') then
+    else if (Engine = 'gemini') and (GeminiKeyEdit.Text = '') then
     begin
       if MsgBox(
-        'You selected Deepgram for speech recognition but did not enter a Deepgram API key.'#13#10#13#10 +
+        'You selected Gemini for speech recognition but did not enter a Gemini API key.'#13#10#13#10 +
+        'Continue anyway?',
+        mbConfirmation, MB_YESNO
+      ) = IDNO then
+        Result := False;
+    end
+    else if (Engine = 'google_cloud') and (GCloudKeyEdit.Text = '') then
+    begin
+      if MsgBox(
+        'You selected Google Cloud for speech recognition but did not enter a Google Cloud API key.'#13#10#13#10 +
         'Continue anyway?',
         mbConfirmation, MB_YESNO
       ) = IDNO then
