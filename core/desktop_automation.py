@@ -122,18 +122,26 @@ def open_application(app_name: str) -> AutomationResult:
         Result with the launched process info.
     """
     normalized = app_name.strip().lower()
-    executable = _APP_ALIASES.get(normalized, normalized)
+    executable = _APP_ALIASES.get(normalized)
+
+    # Security: only allow known aliases — reject arbitrary executables
+    if executable is None:
+        logger.warning("Unknown application alias: '{}' — rejected for safety", app_name)
+        return AutomationResult(
+            success=False,
+            error=f"Unknown application '{app_name}'. Only known app aliases are allowed.",
+            risk=RiskLevel.LOW,
+        )
 
     logger.info("Opening application: '{}' → '{}'", app_name, executable)
 
     try:
         # Handle ms-settings: and other URI schemes
         if ":" in executable and not executable.startswith(("C:", "D:", "E:")):
-            subprocess.Popen(["start", executable], shell=True)
+            subprocess.Popen(["cmd", "/c", "start", "", executable])
         else:
             subprocess.Popen(
-                executable,
-                shell=True,
+                [executable],
                 stdout=subprocess.DEVNULL,
                 stderr=subprocess.DEVNULL,
             )

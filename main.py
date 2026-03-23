@@ -186,10 +186,41 @@ def main() -> None:
     )
 
     def _open_settings() -> None:
-        dlg = SettingsDialog(parent=None)
+        # Build flat dict from current settings for the dialog
+        current = {
+            "hotkey": settings.general.hotkey,
+            "mode": settings.general.mode,
+            "auto_start": settings.general.auto_start,
+            "theme": settings.general.theme.title(),
+            "stt_engine": settings.stt.engine,
+            "groq_stt_api_key": settings.stt.groq_api_key,
+            "deepgram_api_key": settings.stt.deepgram_api_key,
+            "openai_api_key": settings.stt.openai_api_key,
+            "gemini_stt_api_key": getattr(settings.stt, "gemini_api_key", ""),
+            "google_cloud_stt_api_key": getattr(settings.stt, "google_cloud_api_key", ""),
+            "stt_language": settings.stt.language,
+            "polishing_enabled": settings.polishing.enabled,
+            "polish_provider": settings.polishing.provider,
+            "context_aware": settings.polishing.context_aware,
+            "sample_rate": settings.audio.sample_rate,
+            "font_size": settings.ui.font_size,
+            "show_interim": settings.ui.show_interim_results,
+        }
+        dlg = SettingsDialog(settings=current, parent=None)
         if dlg.exec():
             new_settings = dlg.get_settings()
             logger.info("Settings saved: {}", {k: "***" if "key" in k else v for k, v in new_settings.items()})
+            # Persist to config.toml
+            try:
+                settings.stt.engine = new_settings.get("stt_engine", settings.stt.engine)
+                settings.stt.groq_api_key = new_settings.get("groq_stt_api_key", "")
+                settings.stt.deepgram_api_key = new_settings.get("deepgram_api_key", "")
+                settings.stt.openai_api_key = new_settings.get("openai_api_key", "")
+                settings.polishing.enabled = new_settings.get("polishing_enabled", True)
+                settings.polishing.provider = new_settings.get("polish_provider", "groq")
+                settings.save(config_path)
+            except Exception:
+                logger.exception("Failed to persist settings")
 
     tray.settings_requested.connect(_open_settings)
 
@@ -299,9 +330,9 @@ def main() -> None:
 
     # --- Tray status info ----------------------------------------------------
     engine_name = settings.stt.engine
-    tray.set_engine_status(f"Engine: {engine_name}")
+    tray.set_engine_status(engine_name)
     lang = settings.stt.language
-    tray.set_language_status(f"Language: {lang}")
+    tray.set_language_status(lang)
 
     # --- Show tray -----------------------------------------------------------
     tray.show()

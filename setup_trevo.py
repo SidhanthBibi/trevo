@@ -1,15 +1,19 @@
 """First-time setup wizard for trevo.
 
 Run this once to:
-1. Create a virtual environment
-2. Install dependencies
-3. Walk you through API key setup
-4. Verify everything works
+1. Find a compatible Python (3.11-3.13)
+2. Create a virtual environment
+3. Install dependencies (in parallel where possible)
+4. Walk you through API key setup
+5. Verify everything works
+6. Launch the app
 """
 
 import os
+import shutil
 import subprocess
 import sys
+import threading
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent
@@ -30,34 +34,118 @@ def _print_step(n: int, text: str) -> None:
 
 
 def _run(cmd: list[str], **kwargs) -> subprocess.CompletedProcess:
-    print(f"      > {' '.join(cmd)}")
+    print(f"      > {' '.join(cmd[:6])}{'...' if len(cmd) > 6 else ''}")
     return subprocess.run(cmd, **kwargs)
 
 
-def step1_check_python():
-    """Verify Python version."""
-    _print_step(1, "Checking Python version...")
+# ---------------------------------------------------------------------------
+# Step 1: Find a compatible Python
+# ---------------------------------------------------------------------------
+
+def _find_compatible_python() -> str:
+    """Search for Python 3.11-3.13 on the system.
+
+    Checks: current interpreter, `py` launcher, PATH pythons.
+    Returns the path to the best candidate.
+    """
+    candidates: list[tuple[str, tuple[int, int, int]]] = []
+
+    # Check current interpreter
     v = sys.version_info
-    print(f"      Python {v.major}.{v.minor}.{v.micro}")
+    if 3 <= v.major and 11 <= v.minor <= 13:
+        candidates.append((sys.executable, (v.major, v.minor, v.micro)))
 
-    if v.major < 3 or (v.major == 3 and v.minor < 11):
-        print("      [!] trevo requires Python 3.11+")
-        print("      Download from: https://www.python.org/downloads/")
-        sys.exit(1)
+    # Windows `py` launcher — try specific versions
+    if sys.platform == "win32":
+        for minor in (12, 11, 13):
+            try:
+                result = subprocess.run(
+                    ["py", f"-3.{minor}", "--version"],
+                    capture_output=True, text=True, timeout=5,
+                )
+                if result.returncode == 0:
+                    ver_str = result.stdout.strip().split()[-1]  # "Python 3.12.1" -> "3.12.1"
+                    parts = ver_str.split(".")
+                    ver = (int(parts[0]), int(parts[1]), int(parts[2]) if len(parts) > 2 else 0)
+                    py_path = f"py -3.{minor}"
+                    # Get the actual path
+                    path_result = subprocess.run(
+                        ["py", f"-3.{minor}", "-c", "import sys; print(sys.executable)"],
+                        capture_output=True, text=True, timeout=5,
+                    )
+                    if path_result.returncode == 0:
+                        py_path = path_result.stdout.strip()
+                    candidates.append((py_path, ver))
+            except (FileNotFoundError, subprocess.TimeoutExpired):
+                pass
 
-    if v.minor >= 14:
-        print("      [!] Python 3.14 detected — some packages (torch, faster-whisper)")
-        print("          may not have wheels yet. If installs fail, use Python 3.12.")
-        print("          Download 3.12: https://www.python.org/downloads/release/python-3129/")
-        resp = input("      Continue anyway? [y/N]: ").strip().lower()
-        if resp != "y":
-            sys.exit(0)
+    # Check PATH for python3.11, python3.12, python3.13
+    for name in ("python3.12", "python3.11", "python3.13", "python3", "python"):
+        path = shutil.which(name)
+        if path and path not in [c[0] for c in candidates]:
+            try:
+                result = subprocess.run(
+                    [path, "--version"], capture_output=True, text=True, timeout=5,
+                )
+                if result.returncode == 0:
+                    ver_str = result.stdout.strip().split()[-1]
+                    parts = ver_str.split(".")
+                    ver = (int(parts[0]), int(parts[1]), int(parts[2]) if len(parts) > 2 else 0)
+                    if ver[0] == 3 and 11 <= ver[1] <= 13:
+                        candidates.append((path, ver))
+            except (FileNotFoundError, subprocess.TimeoutExpired):
+                pass
 
-    print("      [OK]")
+    if not candidates:
+        return ""
+
+    # Prefer 3.12 > 3.11 > 3.13 (3.12 has best compatibility)
+    def score(item):
+        _, v = item
+        preference = {12: 0, 11: 1, 13: 2}
+        return preference.get(v[1], 99)
+
+    candidates.sort(key=score)
+    return candidates[0][0]
 
 
-def step2_create_venv():
-    """Create virtual environment."""
+def step1_check_python() -> str:
+    """Verify Python version and find the best interpreter."""
+    _print_step(1, "Checking Python versions...")
+
+    v = sys.version_info
+    print(f"      Current interpreter: Python {v.major}.{v.minor}.{v.micro} ({sys.executable})")
+
+    if v.major == 3 and 11 <= v.minor <= 13:
+        print(f"      [OK] Python {v.major}.{v.minor} is compatible!")
+        return sys.executable
+
+    # Current Python is not compatible — search for alternatives
+    print(f"      [!] Python {v.major}.{v.minor} is NOT compatible (need 3.11-3.13)")
+    print("      Searching for compatible Python installations...")
+
+    best = _find_compatible_python()
+    if best:
+        print(f"      [OK] Found compatible Python: {best}")
+        return best
+
+    print()
+    print("      [ERROR] No compatible Python found (3.11-3.13 required)")
+    print()
+    print("      Your installed Python versions:")
+    # Show what's available
+    if sys.platform == "win32":
+        subprocess.run(["py", "--list"], capture_output=False)
+    print()
+    print("      Please install Python 3.12 from:")
+    print("      https://www.python.org/downloads/release/python-3129/")
+    print()
+    print("      Then run this setup again.")
+    sys.exit(1)
+
+
+def step2_create_venv(python_exe: str):
+    """Create virtual environment using the specified Python."""
     _print_step(2, "Creating virtual environment...")
 
     if VENV_DIR.exists():
@@ -67,104 +155,128 @@ def step2_create_venv():
             print("      [SKIP]")
             return
 
-    _run([sys.executable, "-m", "venv", str(VENV_DIR)])
+    _run([python_exe, "-m", "venv", str(VENV_DIR)])
     print("      [OK] Virtual environment created")
 
 
 def _get_pip() -> str:
-    """Return path to pip inside the venv."""
     if sys.platform == "win32":
         return str(VENV_DIR / "Scripts" / "pip.exe")
     return str(VENV_DIR / "bin" / "pip")
 
 
 def _get_python() -> str:
-    """Return path to python inside the venv."""
     if sys.platform == "win32":
         return str(VENV_DIR / "Scripts" / "python.exe")
     return str(VENV_DIR / "bin" / "python")
 
 
+def _install_group(pip: str, name: str, packages: list[str]) -> tuple[str, bool]:
+    """Install a group of packages. Returns (group_name, success)."""
+    result = subprocess.run(
+        [pip, "install"] + packages,
+        capture_output=True, text=True,
+    )
+    return (name, result.returncode == 0)
+
+
 def step3_install_deps():
-    """Install Python dependencies."""
-    _print_step(3, "Installing dependencies (this takes a few minutes)...")
+    """Install Python dependencies in parallel where possible."""
+    _print_step(3, "Installing dependencies (parallel install)...")
 
     pip = _get_pip()
 
-    # Upgrade pip first
+    # Upgrade pip first (must be sequential)
+    print("      Upgrading pip...")
     _run([pip, "install", "--upgrade", "pip"], capture_output=True)
 
-    # Install core deps first (most likely to succeed)
-    core_deps = [
-        "PyQt6>=6.6.0",
-        "PyQt6-Frameless-Window>=0.4.0",
-        "keyboard>=0.13.5",
-        "sounddevice>=0.4.6",
-        "numpy>=1.24.0",
-        "pyperclip>=1.8.2",
-        "pyautogui>=0.9.54",
-        "psutil>=5.9.0",
-        "loguru>=0.7.0",
-        "httpx>=0.27.0",
-        "Pillow>=10.0.0",
-    ]
-    print("\n      Installing core packages...")
-    result = _run([pip, "install"] + core_deps, capture_output=True, text=True)
-    if result.returncode != 0:
-        print(f"      [!] Some core packages failed:\n{result.stderr[:500]}")
-    else:
-        print("      [OK] Core packages installed")
+    # Define independent package groups for parallel install
+    groups = {
+        "Core UI": [
+            "PyQt6>=6.6.0", "PyQt6-Frameless-Window>=0.4.0",
+            "Pillow>=10.0.0",
+        ],
+        "Core System": [
+            "keyboard>=0.13.5", "sounddevice>=0.4.6", "numpy>=1.24.0",
+            "pyperclip>=1.8.2", "pyautogui>=0.9.54", "psutil>=5.9.0",
+        ],
+        "Core Utils": [
+            "loguru>=0.7.0", "httpx>=0.27.0", "tomli>=2.0.0",
+        ],
+        "API Clients": [
+            "deepgram-sdk>=4.5.0", "openai>=1.30.0", "anthropic>=0.25.0",
+        ],
+        "TTS": [
+            "gTTS>=2.3.0", "pyttsx3>=2.90",
+        ],
+        "Build Tools": [
+            "pyinstaller>=6.0",
+        ],
+    }
 
-    # Install API client packages
-    api_deps = ["deepgram-sdk>=4.5.0", "openai>=1.30.0", "anthropic>=0.25.0"]
-    print("\n      Installing API client packages...")
-    result = _run([pip, "install"] + api_deps, capture_output=True, text=True)
-    if result.returncode != 0:
-        print(f"      [!] Some API packages failed: {result.stderr[:300]}")
-    else:
-        print("      [OK] API packages installed")
-
-    # Install Windows-specific
     if sys.platform == "win32":
-        print("\n      Installing Windows integration (pywin32)...")
-        result = _run([pip, "install", "pywin32>=306"], capture_output=True, text=True)
-        if result.returncode != 0:
-            print("      [!] pywin32 failed — context detection will be limited")
-        else:
-            print("      [OK] pywin32 installed")
+        groups["Windows"] = ["pywin32>=306"]
 
-    # Install TOML parser
-    print("\n      Installing config parser...")
-    _run([pip, "install", "tomli>=2.0.0"], capture_output=True)
-    print("      [OK]")
+    # Run all groups in parallel
+    print(f"      Installing {len(groups)} package groups in parallel...")
+    results: list[tuple[str, bool]] = []
+    threads: list[threading.Thread] = []
 
-    # Try torch + faster-whisper (may fail on 3.14)
-    print("\n      Installing offline STT (torch + faster-whisper)...")
-    print("      (This is ~2GB download — skip if you only want cloud STT)")
-    resp = input("      Install offline mode? [Y/n]: ").strip().lower()
-    if resp != "n":
+    def _worker(name, pkgs):
+        r = _install_group(pip, name, pkgs)
+        results.append(r)
+
+    for name, pkgs in groups.items():
+        t = threading.Thread(target=_worker, args=(name, pkgs))
+        threads.append(t)
+        t.start()
+
+    for t in threads:
+        t.join()
+
+    # Report results
+    for name, success in sorted(results, key=lambda x: x[0]):
+        status = "[OK]" if success else "[!] FAILED"
+        print(f"      {status} {name}")
+
+    failed = [name for name, success in results if not success]
+    if failed:
+        print(f"\n      [!] {len(failed)} group(s) had issues: {', '.join(failed)}")
+        print("      The app may still work — try running it.")
+    else:
+        print("\n      [OK] All packages installed successfully!")
+
+    # Optional: offline STT (large download, ask first)
+    print("\n      Offline STT requires torch + faster-whisper (~2GB download)")
+    resp = input("      Install offline mode? [y/N]: ").strip().lower()
+    if resp == "y":
+        print("      Downloading torch + faster-whisper (this may take a while)...")
         result = _run(
             [pip, "install", "torch>=2.0.0", "faster-whisper>=1.0.0"],
-            capture_output=True,
-            text=True,
+            capture_output=True, text=True,
         )
         if result.returncode != 0:
-            print("      [!] torch/faster-whisper failed (likely Python 3.14 issue)")
-            print("      Offline mode won't work, but cloud STT (Deepgram) will.")
+            print("      [!] torch/faster-whisper failed — offline mode unavailable")
+            print("      Cloud STT will still work fine.")
         else:
             print("      [OK] Offline STT ready")
     else:
         print("      [SKIP] Offline mode skipped")
 
-    # Install PyInstaller for building .exe
-    print("\n      Installing PyInstaller (for building .exe)...")
-    _run([pip, "install", "pyinstaller>=6.0"], capture_output=True)
-    print("      [OK]")
-
 
 def step4_setup_api_keys():
     """Walk user through API key configuration."""
     _print_step(4, "Setting up API keys...")
+
+    if not CONFIG_PATH.exists():
+        # Copy from example if available
+        example = ROOT / "config.toml.example"
+        if example.exists():
+            shutil.copy2(example, CONFIG_PATH)
+        else:
+            print("      [!] config.toml not found. Skipping API key setup.")
+            print("      You can configure keys later in Settings.")
+            return
 
     print("""
       trevo supports several providers. We recommend the FREE options:
@@ -181,95 +293,81 @@ def step4_setup_api_keys():
            Install: https://ollama.com
            Then run: ollama pull llama3.2
 
-      OPTIONAL (Paid):
+      OPTIONAL (Paid / Subscription):
         D. Deepgram — Cloud STT ($0.0043/min, $200 free credit)
-        E. OpenAI   — Cloud STT + LLM
-        F. Anthropic — Cloud LLM
+        E. OpenAI   — Cloud STT + LLM (or use ChatGPT Plus plan)
+        F. Anthropic — Cloud LLM (or use Claude Pro plan)
+
+      TIP: If you have Claude Pro or ChatGPT Plus, you can use those
+      subscriptions instead of API keys — see README for details.
     """)
 
-    # Read current config
     config_text = CONFIG_PATH.read_text(encoding="utf-8")
 
-    # Groq key (recommended — covers both STT and LLM for free)
+    # Groq key
     groq_key = input("      Enter Groq API key (FREE — recommended, or Enter to skip): ").strip()
     if groq_key:
-        config_text = config_text.replace(
-            'groq_api_key = ""',
-            f'groq_api_key = "{groq_key}"',
-        )
-        # Set Groq as default STT + polishing provider
-        config_text = config_text.replace(
-            'engine = "deepgram"',
-            'engine = "groq"',
-        )
-        config_text = config_text.replace(
-            'provider = "openai"',
-            'provider = "groq"',
-        )
+        config_text = config_text.replace('groq_api_key = ""', f'groq_api_key = "{groq_key}"')
+        config_text = config_text.replace('engine = "deepgram"', 'engine = "groq"')
+        config_text = config_text.replace('provider = "openai"', 'provider = "groq"')
         print("      [OK] Groq key saved (STT + AI polishing)")
 
     # Gemini key
     gemini_key = input("      Enter Gemini API key (FREE — or Enter to skip): ").strip()
     if gemini_key:
-        config_text = config_text.replace(
-            'gemini_api_key = ""',
-            f'gemini_api_key = "{gemini_key}"',
-        )
+        config_text = config_text.replace('gemini_api_key = ""', f'gemini_api_key = "{gemini_key}"')
         if not groq_key:
-            config_text = config_text.replace(
-                'provider = "openai"',
-                'provider = "gemini"',
-            )
+            config_text = config_text.replace('provider = "openai"', 'provider = "gemini"')
         print("      [OK] Gemini key saved")
 
-    # Deepgram key (optional)
+    # Deepgram key
     dg_key = input("      Enter Deepgram API key (optional, or Enter to skip): ").strip()
     if dg_key:
-        config_text = config_text.replace(
-            'deepgram_api_key = ""',
-            f'deepgram_api_key = "{dg_key}"',
-            1,
-        )
+        config_text = config_text.replace('deepgram_api_key = ""', f'deepgram_api_key = "{dg_key}"', 1)
         print("      [OK] Deepgram key saved")
 
-    # OpenAI key (optional)
+    # OpenAI key
     oai_key = input("      Enter OpenAI API key (optional, or Enter to skip): ").strip()
     if oai_key:
-        config_text = config_text.replace(
-            'openai_api_key = ""',
-            f'openai_api_key = "{oai_key}"',
-        )
+        config_text = config_text.replace('openai_api_key = ""', f'openai_api_key = "{oai_key}"')
         print("      [OK] OpenAI key saved")
 
-    # Anthropic key (optional)
+    # Anthropic key
     ant_key = input("      Enter Anthropic API key (optional, or Enter to skip): ").strip()
     if ant_key:
-        config_text = config_text.replace(
-            'anthropic_api_key = ""',
-            f'anthropic_api_key = "{ant_key}"',
-        )
+        config_text = config_text.replace('anthropic_api_key = ""', f'anthropic_api_key = "{ant_key}"')
         print("      [OK] Anthropic key saved")
+
+    # Memory vault location
+    print()
+    default_vault = str(Path.home() / "trevo-vault")
+    vault_path = input(f"      Memory Vault location [{default_vault}]: ").strip()
+    if not vault_path:
+        vault_path = default_vault
+    # Ensure vault directory exists
+    Path(vault_path).mkdir(parents=True, exist_ok=True)
+    if 'vault_path' in config_text:
+        # Replace existing vault_path
+        import re
+        config_text = re.sub(
+            r'vault_path\s*=\s*"[^"]*"',
+            f'vault_path = "{vault_path}"',
+            config_text,
+        )
+    else:
+        config_text += f'\n[knowledge]\nvault_path = "{vault_path}"\n'
 
     # If no cloud keys at all, switch to offline mode
     if not groq_key and not dg_key and not oai_key:
         print("\n      No cloud STT key provided — switching to offline (whisper_local) mode")
-        config_text = config_text.replace(
-            'engine = "deepgram"',
-            'engine = "whisper_local"',
-        )
+        config_text = config_text.replace('engine = "deepgram"', 'engine = "whisper_local"')
         if not groq_key and not gemini_key and not oai_key and not ant_key:
-            config_text = config_text.replace(
-                'provider = "groq"',
-                'provider = "ollama"',
-            )
+            config_text = config_text.replace('provider = "groq"', 'provider = "ollama"')
 
-    # Write updated config
     CONFIG_PATH.write_text(config_text, encoding="utf-8")
-    print("      [OK] Config saved to config.toml")
-    print()
+    print("\n      [OK] Config saved to config.toml")
     print("      [!] IMPORTANT: config.toml contains your API keys.")
     print("          NEVER share this file or commit it to git.")
-    print("          It's already in .gitignore.")
 
 
 def step5_verify():
@@ -282,7 +380,6 @@ import sys
 sys.path.insert(0, r'{root}')
 errors = []
 
-# Core
 try:
     from PyQt6.QtWidgets import QApplication
     print("      [OK] PyQt6")
@@ -311,13 +408,6 @@ except Exception as e:
     errors.append(f"numpy: {{e}}")
     print(f"      [FAIL] numpy: {{e}}")
 
-try:
-    import pyperclip
-    print("      [OK] pyperclip")
-except Exception as e:
-    errors.append(f"pyperclip: {{e}}")
-    print(f"      [FAIL] pyperclip: {{e}}")
-
 # Optional
 try:
     import torch
@@ -331,18 +421,6 @@ try:
 except:
     print("      [--] faster-whisper not installed")
 
-try:
-    import openai
-    print("      [OK] openai")
-except:
-    print("      [--] openai not installed")
-
-try:
-    import deepgram
-    print("      [OK] deepgram-sdk")
-except:
-    print("      [--] deepgram-sdk not installed")
-
 if errors:
     print(f"\\n      [!] {{len(errors)}} required packages failed. Fix before running trevo.")
     sys.exit(1)
@@ -353,8 +431,8 @@ else:
     _run([py, "-c", test_code])
 
 
-def step6_instructions():
-    """Print final instructions."""
+def step6_launch():
+    """Offer to launch trevo."""
     _print_step(6, "Setup complete!")
 
     py = _get_python()
@@ -364,31 +442,18 @@ def step6_instructions():
     ╠══════════════════════════════════════════════════════════╣
     ║                                                         ║
     ║  TO RUN:                                                ║
-    ║    {py} main.py                       ║
+    ║    {py:<50s} ║
+    ║    main.py                                              ║
     ║                                                         ║
     ║  TO BUILD .EXE:                                         ║
-    ║    {py} build.py                      ║
-    ║    (output: dist/trevo.exe)                             ║
-    ║                                                         ║
-    ║  HOW IT WORKS:                                          ║
-    ║    1. trevo starts in the system tray (bottom-right)    ║
-    ║    2. Press Ctrl+Shift+Space to start dictating         ║
-    ║    3. A floating bar appears at the top of your screen  ║
-    ║    4. Speak naturally — your words appear in real-time  ║
-    ║    5. Press Ctrl+Shift+Space again to stop              ║
-    ║    6. Polished text is pasted into whatever app you're  ║
-    ║       typing in (email, Slack, VS Code, etc.)           ║
+    ║    {py:<50s} ║
+    ║    build.py                                             ║
     ║                                                         ║
     ║  HOTKEYS:                                               ║
     ║    Ctrl+Shift+Space  = Start/stop dictation             ║
     ║    Ctrl+Shift+C      = Voice command mode               ║
-    ║    Ctrl+Shift+M      = Mute/unmute                      ║
+    ║    Ctrl+Shift+T      = Trevo Mode (JARVIS sphere)       ║
     ║    Escape             = Cancel                           ║
-    ║                                                         ║
-    ║  KNOWLEDGE VAULT:                                       ║
-    ║    Your notes are saved as .md files at:                ║
-    ║    ~/trevo-vault/                                       ║
-    ║    Open this folder in Obsidian to browse them!         ║
     ║                                                         ║
     ║  SETTINGS:                                              ║
     ║    Right-click the tray icon > Settings                 ║
@@ -397,19 +462,26 @@ def step6_instructions():
     ╚══════════════════════════════════════════════════════════╝
     """)
 
+    resp = input("      Launch trevo now? [Y/n]: ").strip().lower()
+    if resp != "n":
+        print("      Starting trevo...")
+        subprocess.Popen([py, str(ROOT / "main.py")])
+        print("      [OK] trevo is running in the system tray!")
+    else:
+        print(f"      Run later with: {py} main.py")
+
 
 def main():
     _print_header("trevo — First-Time Setup")
     print("  This wizard will set up everything you need to run trevo.")
-    print("  It takes about 5 minutes.")
     print()
 
-    step1_check_python()
-    step2_create_venv()
+    python_exe = step1_check_python()
+    step2_create_venv(python_exe)
     step3_install_deps()
     step4_setup_api_keys()
     step5_verify()
-    step6_instructions()
+    step6_launch()
 
 
 if __name__ == "__main__":

@@ -291,7 +291,6 @@ if HAS_OPENGL:
             # Expansion factor for LISTENING state
             expansion = 1.1 if self._state == TrevoState.LISTENING else 1.0
 
-            glBegin(GL_POINTS)
             for i, (bx, by, bz) in enumerate(self._base_points):
                 # Organic displacement
                 offset_x = math.sin(elapsed * self._speed + i * 0.1) * 0.05
@@ -317,13 +316,14 @@ if HAS_OPENGL:
                 depth = pz + _SPHERE_RADIUS  # 0 .. 2*radius
                 depth_norm = depth / (2.0 * _SPHERE_RADIUS)
                 alpha = 0.3 + 0.7 * depth_norm
-                glColor4f(r, g, b, alpha)
 
-                # Point size: larger when closer to camera
+                # Point size must be set OUTSIDE glBegin/glEnd (OpenGL spec)
                 size = 2.0 + 4.0 * depth_norm
                 glPointSize(size)
+                glColor4f(r, g, b, alpha)
+                glBegin(GL_POINTS)
                 glVertex3f(px, py, pz)
-            glEnd()
+                glEnd()
 
 
 # ═══════════════════════════════════════════════════════════════════════════

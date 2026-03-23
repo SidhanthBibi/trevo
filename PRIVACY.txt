@@ -1,0 +1,90 @@
+TREVO - PRIVACY POLICY
+Last Updated: March 23, 2026
+
+1. OVERVIEW
+trevo is a desktop voice-to-text application that runs locally on your Windows
+computer. This privacy policy explains what data is collected, how it is used,
+and how it is stored.
+
+2. DATA WE COLLECT
+
+2.1 Audio Data
+  - trevo captures audio from your microphone ONLY when you explicitly activate
+    recording via a keyboard shortcut, voice wake phrase, or clap detection.
+  - Audio is temporarily held in memory and sent to your configured speech-to-
+    text provider for transcription.
+  - Audio is NOT stored on disk unless you enable the "save_audio" option.
+
+2.2 Transcripts
+  - Transcribed text is stored locally in a SQLite database on your machine.
+  - Transcripts include: raw text, polished text, timestamp, language, and the
+    name of the active application window at the time of recording.
+
+2.3 Knowledge Vault
+  - Notes, daily logs, and knowledge files are stored as .md files in a local
+    folder you choose during setup (default: ~/trevo-vault/).
+  - These files never leave your machine.
+
+2.4 Voice Embeddings
+  - If you enroll for speaker recognition, a mathematical embedding of your
+    voice (256-dimensional vector) is saved locally as a .npy file.
+  - This is NOT a recording of your voice — it cannot be used to reconstruct
+    your speech.
+
+2.5 Configuration
+  - API keys and preferences are stored in a local config.toml file.
+  - This file is in your app installation directory and is NOT transmitted
+    anywhere.
+
+3. THIRD-PARTY DATA SHARING
+When you use cloud-based services, the following data is sent to your chosen
+providers:
+
+  | Provider       | Data Sent                    | Purpose            |
+  |----------------|------------------------------|--------------------|
+  | Groq           | Audio chunks or text         | STT / LLM          |
+  | Google Cloud   | Audio chunks or text         | STT / TTS          |
+  | OpenAI         | Audio chunks or text         | STT / LLM          |
+  | Anthropic      | Text                         | LLM                |
+  | Deepgram       | Audio stream                 | STT                |
+  | Ollama (local) | Text (stays on your machine) | LLM                |
+
+Each provider has its own privacy policy. We encourage you to review them.
+
+If you use ONLY local providers (Whisper Local + Ollama), NO data leaves your
+machine.
+
+4. DATA WE DO NOT COLLECT
+  - We do not collect analytics or telemetry.
+  - We do not track your usage.
+  - We do not collect personal information.
+  - We do not have accounts or user registration.
+  - We do not operate any servers that receive your data.
+
+5. DATA STORAGE AND SECURITY
+  - All data is stored locally on your machine.
+  - API keys are stored in plaintext in config.toml. We recommend setting
+    appropriate file permissions.
+  - Future versions may support Windows Credential Store for secure key
+    storage.
+
+6. DATA DELETION
+  - Uninstalling trevo removes the application files.
+  - Your Memory Vault, transcripts database, and config.toml remain on your
+    machine until you manually delete them.
+  - To fully remove all data:
+    1. Uninstall trevo
+    2. Delete your Memory Vault folder (default: ~/trevo-vault/)
+    3. Delete %LOCALAPPDATA%\trevo\
+
+7. CHILDREN'S PRIVACY
+trevo is not directed at children under 13. We do not knowingly collect data
+from children.
+
+8. CHANGES TO THIS POLICY
+This policy may be updated in future releases. Changes will be noted in the
+release changelog.
+
+9. CONTACT
+For privacy questions, open an issue at:
+https://github.com/sidhanthbibi/trevo/issues

@@ -533,9 +533,13 @@ class SettingsDialog(QDialog):
             if self._engine_combo.itemData(i) == engine_val:
                 self._engine_combo.setCurrentIndex(i)
                 break
+        # Manually trigger engine change handler in case index didn't change
+        self._on_engine_changed(self._engine_combo.currentIndex())
         self._groq_stt_key.setText(s.get("groq_stt_api_key", ""))
         self._deepgram_key.setText(s.get("deepgram_api_key", ""))
         self._openai_stt_key.setText(s.get("openai_api_key", ""))
+        self._gemini_stt_key.setText(s.get("gemini_stt_api_key", ""))
+        self._google_cloud_stt_key.setText(s.get("google_cloud_stt_api_key", ""))
         model_idx = self._stt_model_combo.findText(
             s.get("stt_model", "nova-3"), Qt.MatchFlag.MatchFixedString
         )
@@ -604,6 +608,8 @@ class SettingsDialog(QDialog):
             "groq_stt_api_key": self._groq_stt_key.text(),
             "deepgram_api_key": self._deepgram_key.text(),
             "openai_api_key": self._openai_stt_key.text(),
+            "gemini_stt_api_key": self._gemini_stt_key.text(),
+            "google_cloud_stt_api_key": self._google_cloud_stt_key.text(),
             "stt_model": self._stt_model_combo.currentText(),
             "stt_language": self._stt_language.currentText(),
             # AI Polishing

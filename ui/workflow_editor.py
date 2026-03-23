@@ -75,7 +75,7 @@ from PyQt6.QtWidgets import (
     QWidget,
 )
 
-from trevo.core.workflow_engine import (
+from core.workflow_engine import (
     Port,
     Workflow,
     WorkflowConnection,
@@ -598,7 +598,7 @@ class WorkflowScene(QGraphicsScene):
         """Lay out nodes left-to-right based on topological order."""
         if not self.workflow:
             return
-        from trevo.core.workflow_engine import WorkflowEngine
+        from core.workflow_engine import WorkflowEngine
         try:
             order = WorkflowEngine._topological_sort(self.workflow)
         except ValueError:
@@ -1169,12 +1169,18 @@ class WorkflowEditorDialog(QDialog):
                 self._status.showMessage(f"Error: {exc}")
                 log.error("Workflow execution failed: %s", exc)
 
-        # If there is already a running loop, schedule on it. Otherwise run.
-        try:
-            loop = _asyncio.get_running_loop()
-            loop.create_task(_run())
-        except RuntimeError:
-            _asyncio.run(_run())
+        # Run workflow in a background thread to avoid blocking the Qt event loop
+        import threading
+
+        def _run_in_thread():
+            try:
+                import asyncio as _aio
+                _aio.run(_run())
+            except Exception as exc:
+                log.error("Workflow execution failed in thread: %s", exc)
+
+        t = threading.Thread(target=_run_in_thread, daemon=True)
+        t.start()
 
     def _auto_arrange(self) -> None:
         self._scene.auto_arrange()

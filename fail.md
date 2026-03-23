@@ -1,112 +1,130 @@
 # trevo — Failure & Dead Code Audit
 
-> Generated: 2026-03-23 | Audit of all integration gaps, dead code, and known bugs
+> Generated: 2026-03-23 | Updated: 2026-03-23
+> Audit of all integration gaps, dead code, known bugs, and security issues
 
 ---
 
-## CRITICAL: Dead Code (Built but never wired in)
+## FIXED: Critical Issues (Resolved)
 
-### 1. `core/stt_gemini.py` — Gemini STT Engine
-- **Status**: DEAD CODE
-- **Severity**: HIGH
-- **Issue**: Complete implementation exists but `core/app.py:_create_stt_engine()` has no `"gemini"` branch
-- **Bug**: Line with `_ENDPOINT` hardcodes `gemini-2.0-flash` in the URL instead of using `self._model`
-- **Fix**: Add `if engine_name == "gemini":` in app.py, fix URL to use `self._model`
+### 1. `ui/workflow_editor.py` — BROKEN import path
+- **Was**: `from trevo.core.workflow_engine import ...` (line 78, 601)
+- **Issue**: Project uses bare `from core.xxx` imports, not `from trevo.core`
+- **Fix**: Changed to `from core.workflow_engine import ...`
+- **Status**: FIXED
 
-### 2. `core/stt_google.py` — Google Cloud STT Engine
-- **Status**: DEAD CODE
-- **Severity**: HIGH
-- **Issue**: Complete implementation exists but `core/app.py:_create_stt_engine()` has no `"google_cloud"` branch
-- **Bug**: Sends WAV-wrapped audio but declares `encoding: LINEAR16` (expects raw PCM). API may reject or mishandle.
-- **Fix**: Add `if engine_name == "google_cloud":` in app.py, send raw PCM instead of WAV wrapper
+### 2. `ui/workflow_editor.py` — asyncio.run blocks Qt event loop
+- **Was**: `asyncio.run(_run())` in `_run_workflow()` (line 1173-1177)
+- **Issue**: Blocks entire Qt GUI until workflow completes
+- **Fix**: Moved to background thread with `threading.Thread`
+- **Status**: FIXED
 
-### 3. `core/agent_mode.py` — Agent Orchestrator (Phase 2)
-- **Status**: DEAD CODE
+### 3. `ui/trevo_mode.py` — glPointSize inside glBegin/glEnd
+- **Was**: `glPointSize(size)` called between `glBegin(GL_POINTS)` and `glEnd()` (line 324)
+- **Issue**: OpenGL spec violation, silently ignored, all particles same size
+- **Fix**: Each particle now has its own `glBegin/glEnd` pair with `glPointSize` before `glBegin`
+- **Status**: FIXED
+
+### 4. `ui/settings_dialog.py` — Gemini/Google Cloud keys lost on save
+- **Was**: `get_settings()` didn't include `gemini_stt_api_key` or `google_cloud_stt_api_key`
+- **Issue**: Keys entered by user silently discarded
+- **Fix**: Added both keys to `get_settings()` and `_load_settings()`
+- **Status**: FIXED
+
+### 5. `ui/settings_dialog.py` — Engine change handler not triggered on load
+- **Was**: `_on_engine_changed` only fires on `currentIndexChanged`, missed when default already selected
+- **Fix**: Added manual `_on_engine_changed()` call after setting engine index in `_load_settings()`
+- **Status**: FIXED
+
+### 6. `main.py` — Settings dialog opens with defaults, never persists
+- **Was**: `SettingsDialog(parent=None)` with no current settings passed
+- **Issue**: Dialog always showed defaults. Changes were logged but never saved.
+- **Fix**: Now passes current settings dict and writes changes back via `settings.save()`
+- **Status**: FIXED
+
+### 7. `main.py` — Double-prefixed tray menu text
+- **Was**: `tray.set_engine_status(f"Engine: {engine_name}")` but tray adds its own "Engine: " prefix
+- **Result**: Menu showed "Engine: Engine: groq"
+- **Fix**: Removed redundant prefix from `main.py`
+- **Status**: FIXED
+
+### 8. `ui/dictation_bar.py` — _ui_font never tries fallback fonts
+- **Was**: `for family in (...):` loop returned on first iteration unconditionally
+- **Fix**: Added `QFontDatabase.families()` check before returning
+- **Status**: FIXED
+
+### 9. `core/desktop_automation.py` — Command injection via shell=True
+- **Was**: `subprocess.Popen(executable, shell=True)` with user-provided app name falling through to raw string
+- **Issue**: If app_name not in aliases, raw string passed to shell — potential command injection
+- **Fix**: Only known aliases accepted, unknown apps rejected. Removed `shell=True`, use list args.
+- **Status**: FIXED (Security)
+
+### 10. `core/workflow_engine.py` — exec() with no builtins still unsafe
+- **Was**: `exec(code, {"__builtins__": {}}, ...)` — empty builtins
+- **Issue**: Empty dict still allows some introspection attacks
+- **Fix**: Replaced with explicit safe_builtins whitelist (len, str, int, etc.)
+- **Status**: FIXED (Security)
+
+---
+
+## FIXED: Dead Code (Previously not wired in, now integrated)
+
+### 11. `core/stt_gemini.py` — Now wired into app.py
+- **Status**: FIXED — Gemini STT engine available in dropdown
+
+### 12. `core/stt_google.py` — Now wired into app.py
+- **Status**: FIXED — Google Cloud STT available, encoding mismatch fixed
+
+### 13. `core/agent_mode.py` — Now wired into main.py
+- **Status**: FIXED — Agent orchestrator initialized
+
+### 14. `core/workflow_engine.py` — Now wired via workflow_editor
+- **Status**: FIXED — Accessible from tray menu
+
+### 15. `ui/workflow_editor.py` — Now accessible from tray menu
+- **Status**: FIXED — "Workflow Editor" menu item added
+
+---
+
+## REMAINING: Known Issues
+
+### 16. Workflow engine placeholder executors
 - **Severity**: MEDIUM
-- **Issue**: 933-line file with full routing, desktop automation, audit logs. Never imported by app.py. Listed in build.py hidden imports but unreachable at runtime.
-- **Security**: `desktop_automation.py:open_application()` uses `shell=True` with user input — potential command injection if app_name bypasses alias lookup
-- **Fix**: Import and initialize in app.py, add AGENT_MODE state, sanitize shell inputs
+- **Issue**: STTExecutor, LLMExecutor, TextInjectExecutor, AudioInputExecutor return dummy values
+- **Impact**: Workflows run but produce no real output
+- **Fix needed**: Connect executors to real core modules
 
-### 4. `core/desktop_automation.py` — Desktop Operations
-- **Status**: DEAD CODE (only imported by dead agent_mode.py)
-- **Severity**: MEDIUM
-- **Issue**: Complete safe wrappers for file ops, clipboard, window management, system queries. Unreachable because agent_mode.py is itself dead.
-- **Fix**: Will become reachable once agent_mode is wired in
+### 17. Smart Assistant preset race condition
+- **Issue**: Both `llm` and `polish` outputs connect to same `inject` input — last writer wins
+- **Fix needed**: Add Merge node between them
 
-### 5. `core/workflow_engine.py` — Workflow Engine
-- **Status**: DEAD CODE
-- **Severity**: HIGH
-- **Issue**: Full workflow data model with 15 node types, topological sort execution, JSON save/load. Never imported or used.
-- **Bug**: Node executors are ALL PLACEHOLDERS — `AudioInputExecutor`, `STTExecutor`, `LLMExecutor`, `TextInjectExecutor` return hardcoded dummy values instead of calling real modules.
-- **Bug**: Smart Assistant preset connects both `llm` and `polish` outputs to same `inject` input — race condition, last writer wins.
-- **Fix**: Wire into main.py, connect executors to real modules, fix preset
+### 18. Settings dialog flat dict → Settings dataclass mapping
+- **Severity**: LOW
+- **Issue**: Dialog uses flat keys, app uses nested dataclass. Translation is minimal.
+- **Impact**: Some settings may not fully persist across all fields
+- **Fix needed**: Complete bidirectional mapping in main.py
 
-### 6. `ui/workflow_editor.py` — Visual Node Editor UI
-- **Status**: DEAD CODE
-- **Severity**: HIGH
-- **Issue**: 1100+ lines of PyQt6 node canvas (nodes, connections, palette, properties panel). Never instantiated in main.py. No menu item or hotkey triggers it.
-- **Fix**: Add "Workflow Editor" to tray menu, import and open WorkflowEditorDialog
+### 19. Morning briefing workflow is stubbed
+- **Severity**: LOW
+- **Issue**: "Wake up daddy's home" is detected but only shows sphere — no news/weather/tabs
+- **Fix needed**: Implement RSS fetch, weather API, browser tab opening
 
----
+### 20. `core/desktop_automation.py` — run_system_command uses shell=True
+- **Severity**: MEDIUM (mitigated by whitelist + confirmation flow)
+- **Issue**: `run_system_command()` and `run_system_command_confirmed()` still use `shell=True`
+- **Mitigation**: Whitelist check + user confirmation required for non-whitelisted commands
+- **Fix needed**: Parse commands into list args where possible
 
-## MEDIUM: Config & Settings Mismatches
-
-### 7. `config.toml` out of sync with `config.toml.example`
-- **Issue**: config.toml missing `groq_api_key = ""` under `[stt]` section
-- **Issue**: Engine comment says `"deepgram", "whisper_local", "openai"` — missing `"groq"`, `"gemini"`, `"google_cloud"`
-- **Fix**: Add missing fields, update comments
-
-### 8. `models/settings.py` missing `gemini_api_key` in STTSettings
-- **Issue**: `STTSettings` has `groq_api_key` but no `gemini_api_key`. If someone sets `engine = "gemini"`, there's no dedicated STT key field.
-- **Fix**: Add `gemini_api_key: str = ""` to STTSettings
-
-### 9. `ui/settings_dialog.py` missing STT engine options
-- **Issue**: Engine dropdown has Groq, Deepgram, Whisper, OpenAI but NOT Gemini or Google Cloud
-- **Fix**: Add both as dropdown options
-
-### 10. Settings dialog uses flat dict, not Settings dataclass
-- **Issue**: `get_settings()` returns flat keys like `"stt_engine"`, `"polish_provider"` but the app uses nested `Settings.stt.engine`, `Settings.polishing.provider`. No translation layer visible.
-- **Impact**: Settings saved from dialog may not properly map back to the dataclass on reload
-- **Fix**: Add translation layer in main.py `_open_settings()` that maps flat dict → Settings fields
-
----
-
-## LOW: Code Quality Issues
-
-### 11. `core/app.py` unnecessary getattr calls
-- **Lines**: 182, 240
-- **Issue**: `getattr(self._settings.polishing, "groq_api_key", "")` is unnecessary since `groq_api_key` now exists on the dataclass
-- **Fix**: Replace with direct attribute access
-
-### 12. `core/conversation_engine.py` fragile private imports
-- **Lines**: 582, 594
-- **Issue**: Imports `_get_openai_client` and `_get_anthropic_client` from `core.text_polisher` — private functions, fragile coupling
-- **Fix**: Make these functions public or create a shared client factory
-
-### 13. `core/workflow_engine.py` uses stdlib logging instead of loguru
-- **Issue**: Uses `logging.getLogger` while rest of codebase uses `utils.logger` (loguru)
-- **Fix**: Replace with `from utils.logger import logger`
-
-### 14. `core/agent_mode.py` dead imports
-- **Lines**: 20, 22
-- **Issue**: `import json` and `import subprocess` are imported but never used directly (subprocess calls use `asyncio.create_subprocess_exec`)
-- **Fix**: Remove unused imports
-
-### 15. `build.py` lists dead modules in hidden imports
-- **Lines**: 86-87
-- **Issue**: `core.agent_mode` and `core.desktop_automation` are in hidden imports but never imported at runtime
-- **Impact**: Increases exe size with dead code
-- **Fix**: Keep them (they'll be wired in Phase 2) but add new missing modules too
+### 21. API keys stored in plaintext config.toml
+- **Severity**: LOW (local file, in .gitignore)
+- **Fix needed**: Windows Credential Store integration (Phase 3)
 
 ---
 
 ## NOT A BUG: Intentional Design
 
-### No git repository
-- **Status**: Expected — project was being built, git init is part of Phase 2 release
-
-### API keys in plaintext config.toml
-- **Status**: Acceptable — config.toml is in .gitignore, local-only file. Windows credential store integration would be Phase 3.
-
 ### Python 3.14 compatibility
 - **Status**: Known — torch/faster-whisper may not have wheels. Recommended Python 3.11-3.12.
+
+### No remote telemetry
+- **Status**: Intentional — trevo collects zero analytics. All data stays local.

@@ -1,0 +1,66 @@
+TREVO - TERMS AND CONDITIONS
+Last Updated: March 23, 2026
+
+1. ACCEPTANCE OF TERMS
+By installing, copying, or otherwise using trevo ("the Software"), you agree
+to be bound by these Terms and Conditions. If you do not agree, do not install
+or use the Software.
+
+2. LICENSE GRANT
+trevo is provided as open-source software under the MIT License. You are
+granted a non-exclusive, worldwide, royalty-free license to use, copy, modify,
+merge, publish, distribute, sublicense, and/or sell copies of the Software,
+subject to the conditions in the LICENSE file.
+
+3. THIRD-PARTY SERVICES
+The Software integrates with third-party APIs and services including but not
+limited to:
+  - Groq (speech recognition, language models)
+  - Google Cloud (text-to-speech, speech recognition)
+  - OpenAI (speech recognition, language models)
+  - Anthropic Claude (language models)
+  - Deepgram (speech recognition)
+  - Ollama (local language models)
+
+Your use of these services is subject to their respective terms of service and
+privacy policies. The Software developers are not responsible for the
+availability, accuracy, or policies of third-party services.
+
+4. API KEYS AND ACCOUNTS
+You are responsible for obtaining and safeguarding your own API keys. The
+Software stores API keys locally on your machine in a configuration file.
+You must not share your API keys or configuration files.
+
+5. DATA HANDLING
+  a) Audio data is captured from your microphone only when you explicitly
+     activate recording (via hotkey or voice trigger).
+  b) Audio is sent to the STT provider you have configured for transcription.
+  c) Transcripts are stored locally in a SQLite database on your machine.
+  d) Knowledge vault notes are stored as local .md files in the location you
+     specify during setup.
+  e) No data is sent to the Software developers or any party other than
+     your configured service providers.
+
+6. VOICE ENROLLMENT
+If you use the speaker recognition feature, voice embeddings (mathematical
+representations of your voice) are stored locally in your Memory Vault. These
+are not transmitted to any remote service.
+
+7. DISCLAIMER OF WARRANTIES
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.
+
+8. LIMITATION OF LIABILITY
+IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM,
+DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR
+OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE
+OR OTHER DEALINGS IN THE SOFTWARE.
+
+9. MODIFICATIONS
+These terms may be updated in future releases. Continued use of the Software
+after changes constitutes acceptance of the new terms.
+
+10. GOVERNING LAW
+These terms shall be governed by and construed in accordance with applicable
+law in your jurisdiction.

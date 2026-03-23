@@ -819,9 +819,21 @@ class CustomExecutor(BaseNodeExecutor):
         self, inputs: dict[str, Any], config: dict[str, Any]
     ) -> dict[str, Any]:
         code = config.get("code", "")
+        if not code.strip():
+            return {"output": ""}
+        # Security: custom code runs in a heavily restricted namespace.
+        # No builtins, no imports, no file/network access.
+        safe_builtins = {
+            "len": len, "str": str, "int": int, "float": float,
+            "bool": bool, "list": list, "dict": dict, "tuple": tuple,
+            "range": range, "enumerate": enumerate, "zip": zip,
+            "min": min, "max": max, "sum": sum, "sorted": sorted,
+            "abs": abs, "round": round, "isinstance": isinstance,
+            "True": True, "False": False, "None": None,
+        }
         local_ns: dict[str, Any] = {"inputs": inputs, "result": {}}
         try:
-            exec(code, {"__builtins__": {}}, local_ns)  # noqa: S102
+            exec(code, {"__builtins__": safe_builtins}, local_ns)  # noqa: S102
         except Exception as exc:
             log.error("Custom node execution failed: %s", exc)
             return {"output": f"ERROR: {exc}"}

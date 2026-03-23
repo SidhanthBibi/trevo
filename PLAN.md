@@ -35,54 +35,61 @@
 ## Phase 2: Trevo Mode + Workflows + Integration (IN PROGRESS)
 
 ### 2.0 Fix & Integrate Dead Code
-- [ ] Wire stt_gemini.py into app.py (fix hardcoded model URL)
-- [ ] Wire stt_google.py into app.py (fix encoding mismatch)
-- [ ] Wire agent_mode.py into app.py (add AGENT_MODE state)
-- [ ] Sync config.toml with config.toml.example
-- [ ] Add gemini_api_key to STTSettings
-- [ ] Add Gemini/Google Cloud to settings dialog STT dropdown
-- [ ] Update build.py hidden imports for all new modules
-- [ ] Fix unnecessary getattr calls in app.py
+- [x] Wire stt_gemini.py into app.py (fix hardcoded model URL)
+- [x] Wire stt_google.py into app.py (fix encoding mismatch)
+- [x] Wire agent_mode.py into app.py (add AGENT_MODE state)
+- [x] Sync config.toml with config.toml.example
+- [x] Add gemini_api_key to STTSettings
+- [x] Add Gemini/Google Cloud to settings dialog STT dropdown
+- [x] Update build.py hidden imports for all new modules
+- [x] Fix unnecessary getattr calls in app.py
+- [x] Fix workflow_editor.py broken import path (trevo.core → core)
+- [x] Fix glPointSize inside glBegin/glEnd (OpenGL spec violation)
+- [x] Fix settings_dialog missing Gemini/Google Cloud key save/load
+- [x] Fix double-prefix "Engine: Engine:" in tray menu
+- [x] Fix dictation_bar _ui_font never iterating fallbacks
+- [x] Fix settings dialog not passing/persisting current settings
+- [x] Fix workflow_editor asyncio.run blocking Qt event loop
 
 ### 2.1 Trevo Mode (JARVIS Particle Sphere)
-- [ ] Create ui/trevo_mode.py — QOpenGLWidget particle sphere
-- [ ] 200-500 particles on sphere with sin/cos displacement animation
-- [ ] State-based colors: IDLE=blue, LISTENING=green, PROCESSING=orange, SPEAKING=purple, ERROR=red
-- [ ] Inner core glow via additive blending
-- [ ] Frameless, semi-transparent, always-on-top window
-- [ ] Activate only on Ctrl+Shift+T or wake phrase
-- [ ] "Wake up daddy's home" trigger → morning briefing workflow
+- [x] Create ui/trevo_mode.py — QOpenGLWidget particle sphere
+- [x] 200-500 particles on sphere with sin/cos displacement animation
+- [x] State-based colors: IDLE=blue, LISTENING=green, PROCESSING=orange, SPEAKING=purple, ERROR=red
+- [x] Inner core glow via additive blending
+- [x] Frameless, semi-transparent, always-on-top window
+- [x] Activate only on Ctrl+Shift+T or wake phrase
+- [x] "Wake up daddy's home" trigger → morning briefing workflow
 - [ ] Morning briefing: news (RSS), weather (wttr.in), open browser tabs
 - [ ] "No tabs today" session flag support
 - [ ] Always-on conversation mode with VAD hot mic
 
 ### 2.2 TTS Engine
-- [ ] Create core/tts_engine.py with TTSEngine ABC
-- [ ] GoogleCloudTTS (WaveNet, FREE 1M chars/month)
-- [ ] FreeTTS (gTTS, no API key needed)
-- [ ] OfflineTTS (pyttsx3, Windows SAPI)
-- [ ] Fallback chain: Google Cloud → gTTS → pyttsx3
+- [x] Create core/tts_engine.py with TTSEngine ABC
+- [x] GoogleCloudTTS (WaveNet, FREE 1M chars/month)
+- [x] FreeTTS (gTTS, no API key needed)
+- [x] OfflineTTS (pyttsx3, Windows SAPI)
+- [x] Fallback chain: Google Cloud → gTTS → pyttsx3
 - [ ] Add [tts] section to config.toml
 - [ ] Audio playback via sounddevice
 
 ### 2.3 Clap Detection
-- [ ] Create core/clap_detector.py
-- [ ] Bandpass filter 1-5kHz
-- [ ] Double-clap detection (2 spikes within 300-600ms)
-- [ ] Debounce (2s cooldown)
-- [ ] Emit clap_detected signal → toggle Trevo Mode
+- [x] Create core/clap_detector.py
+- [x] Bandpass filter 1-5kHz
+- [x] Double-clap detection (2 spikes within 300-600ms)
+- [x] Debounce (2s cooldown)
+- [x] Emit clap_detected signal → toggle Trevo Mode
 - [ ] Configurable sensitivity in settings
 
 ### 2.4 Speaker Recognition
-- [ ] Create core/speaker_recognition.py
-- [ ] Voice embedding via resemblyzer (256-dim vectors)
-- [ ] Enrollment: "my name is X" → save embedding to ~/trevo-vault/voices/
-- [ ] Runtime: compare embeddings (cosine similarity > 0.75)
+- [x] Create core/speaker_recognition.py
+- [x] Voice embedding via resemblyzer (256-dim vectors)
+- [x] Enrollment: "my name is X" → save embedding to ~/trevo-vault/voices/
+- [x] Runtime: compare embeddings (cosine similarity > 0.75)
 - [ ] Per-user profiles with preferences
 - [ ] Greeting by name in Trevo Mode
 
 ### 2.5 Workflow Editor Integration
-- [ ] Wire workflow_editor.py into main.py tray menu
+- [x] Wire workflow_editor.py into main.py tray menu
 - [ ] Connect STTExecutor to real STT engines
 - [ ] Connect LLMExecutor to real ConversationEngine._call_llm()
 - [ ] Connect TextInjectExecutor to real TextInjector
@@ -96,33 +103,46 @@
 - [ ] Add TTS settings page (provider, voice, language)
 
 ### 2.7 Installer & First-Run
-- [ ] Add Memory Vault location wizard page to installer.iss
-- [ ] Create ui/first_run.py — QWizard first-run experience
-- [ ] Pages: Welcome → API Keys → Memory Vault → Voice Enrollment → Done
-- [ ] Add Memory Vault path to setup_trevo.py
+- [x] Add Memory Vault location wizard page to installer.iss
+- [x] Create ui/first_run.py — QWizard first-run experience
+- [x] Pages: Welcome → API Keys → Memory Vault → Voice Enrollment → Done
+- [x] Add Memory Vault path to setup_trevo.py
+- [x] Add Terms & Conditions and Privacy Policy
+- [x] Fix setup_trevo.py Python version detection (find 3.11-3.13)
+- [x] Parallel dependency installation in setup_trevo.py
+- [x] Launch app after setup completion
 - [ ] Add [knowledge] section to config.toml with vault_path
 
 ### 2.8 MCP Server
-- [ ] Create mcp_server/ directory
-- [ ] Create mcp_server/server.py with FastMCP
-- [ ] Tool: get_status (app state, engine, etc.)
-- [ ] Tool: search_vault (search knowledge notes)
-- [ ] Tool: trigger_workflow (run named workflow)
-- [ ] Tool: get_transcript_history (query recent transcripts)
-- [ ] Document Claude Remote Mode limitation (first-party only)
+- [x] Create mcp_server/ directory
+- [x] Create mcp_server/server.py with FastMCP
+- [x] Tool: get_status (app state, engine, etc.)
+- [x] Tool: search_vault (search knowledge notes)
+- [x] Tool: trigger_workflow (run named workflow)
+- [x] Tool: get_transcript_history (query recent transcripts)
+- [x] Document Claude Remote Mode limitation (first-party only)
 
-### 2.9 Documentation & Audit
-- [ ] Create fail.md (dead code audit)
-- [ ] Create PLAN.md (this file)
-- [ ] Update requirements.txt with all new dependencies
+### 2.9 Security & Quality
+- [x] Fix command injection in desktop_automation.py (shell=True with user input)
+- [x] Sandbox exec() in workflow_engine.py custom nodes
+- [x] Create fail.md (dead code audit)
+- [x] Create PLAN.md (this file)
+- [x] Update requirements.txt with all new dependencies
+- [ ] API keys in Windows Credential Store (no plaintext)
 
 ### 2.10 Git & Release
-- [ ] git init
-- [ ] Update .gitignore (installer_output/, voices/)
-- [ ] Initial commit: trevo v1.0.0
-- [ ] Tag: v1.0.0
+- [x] git init
+- [x] Update .gitignore (installer_output/, voices/)
+- [x] Initial commit: trevo v1.0.0
+- [x] Tag: v1.0.0
 - [ ] Create GitHub repo: sidhanthbibi/trevo
 - [ ] Push to GitHub
+
+### 2.11 Claude Pro / ChatGPT Plus Integration
+- [x] Agent mode uses `claude` CLI for agentic tasks (no API key needed)
+- [ ] Add browser-based ChatGPT integration via playwright/selenium
+- [ ] Add option to route LLM calls through subscription plans
+- [ ] Settings UI for choosing "API key" vs "Subscription plan" mode
 
 ---
 
@@ -132,6 +152,7 @@
 - [ ] macOS support (replace pywin32, test PyInstaller on Mac)
 - [ ] Linux support (PulseAudio/PipeWire, .deb/.AppImage packaging)
 - [ ] Mobile companion app (React Native or Flutter)
+- [ ] Phone companion app that connects to desktop trevo via WebSocket
 
 ### Advanced AI
 - [ ] Agent Mode Phase 2 — multi-step task execution
@@ -152,3 +173,9 @@
 - [ ] Emotion detection from voice
 - [ ] Voice cloning for personalized TTS
 - [ ] Multi-language conversation (auto-detect and switch)
+
+### Connectivity
+- [ ] Phone-to-desktop WebSocket bridge (mic on phone → STT on desktop)
+- [ ] REST API for remote control
+- [ ] Web dashboard for transcript history
+- [ ] Cross-device sync for Memory Vault

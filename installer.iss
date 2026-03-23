@@ -27,6 +27,10 @@ WizardStyle=modern
 PrivilegesRequired=lowest
 ArchitecturesAllowed=x64compatible
 ArchitecturesInstallIn64BitMode=x64compatible
+LicenseFile=TERMS.txt
+InfoBeforeFile=PRIVACY.txt
+UninstallDisplayIcon={app}\{#AppExeName}
+UninstallDisplayName={#AppName}
 
 [Languages]
 Name: "english"; MessagesFile: "compiler:Default.isl"
@@ -41,6 +45,10 @@ Source: "dist\trevo.exe"; DestDir: "{app}"; Flags: ignoreversion
 
 ; Assets
 Source: "ui\assets\*"; DestDir: "{app}\ui\assets"; Flags: ignoreversion recursesubdirs createallsubdirs
+
+; Legal documents
+Source: "TERMS.txt"; DestDir: "{app}"; Flags: ignoreversion
+Source: "PRIVACY.txt"; DestDir: "{app}"; Flags: ignoreversion
 
 ; NOTE: config.toml is generated dynamically by [Code] section — not copied from a template
 

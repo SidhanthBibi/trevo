@@ -103,12 +103,15 @@ def _mono_font(size: int = 12) -> QFont:
 
 
 def _ui_font(size: int = 12, bold: bool = False) -> QFont:
-    """Return a clean UI font."""
+    """Return a clean UI font, trying several families."""
+    from PyQt6.QtGui import QFontDatabase
+    available = set(QFontDatabase.families())
     for family in ("Segoe UI", "SF Pro Display", "Inter", "Helvetica Neue"):
-        f = QFont(family, size)
-        if bold:
-            f.setBold(True)
-        return f
+        if family in available:
+            f = QFont(family, size)
+            if bold:
+                f.setBold(True)
+            return f
     f = QFont("sans-serif", size)
     if bold:
         f.setBold(True)
