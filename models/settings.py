@@ -153,7 +153,7 @@ class Settings:
         """
         candidates: list[Path] = []
         if path is not None:
-            candidates.append(path)
+            candidates.append(Path(path) if isinstance(path, str) else path)
         candidates.append(get_config_path())
         candidates.append(_get_project_config_path())
 
@@ -213,7 +213,7 @@ class Settings:
 
     def save(self, path: Path | None = None) -> None:
         """Save settings to a TOML file."""
-        target = path or get_config_path()
+        target = Path(path) if isinstance(path, str) else (path or get_config_path())
         target.parent.mkdir(parents=True, exist_ok=True)
 
         data = self._to_dict()
