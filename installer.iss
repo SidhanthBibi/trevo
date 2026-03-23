@@ -407,7 +407,7 @@ begin
   VaultDirEdit.Top := 68;
   VaultDirEdit.Left := 0;
   VaultDirEdit.Width := VaultPage.SurfaceWidth - 100;
-  VaultDirEdit.Text := ExpandConstant('{userprofile}\trevo-vault');
+  VaultDirEdit.Text := ExpandConstant('{%USERPROFILE}\trevo-vault');
 
   VaultBrowseButton := TNewButton.Create(VaultPage);
   VaultBrowseButton.Parent := VaultPage.Surface;
