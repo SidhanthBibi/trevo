@@ -12,11 +12,15 @@ from __future__ import annotations
 import math
 import random
 import time
+from dataclasses import dataclass
 from enum import Enum
 from typing import List, Optional, Tuple
 
+import re as _re
+
 from PyQt6.QtCore import (
     QPoint,
+    QPointF,
     QPropertyAnimation,
     QRectF,
     Qt,
@@ -28,6 +32,7 @@ from PyQt6.QtGui import (
     QAction,
     QColor,
     QFont,
+    QFontMetrics,
     QMouseEvent,
     QPainter,
     QPainterPath,
@@ -135,8 +140,58 @@ _STATE_LABELS: dict[TrevoState, str] = {
 _SPHERE_RADIUS = 1.0
 _TRANSITION_MS = 500
 _SPHERE_SIZE = 380
-_WINDOW_SIZE = 420
+_WINDOW_W = 420
+_WINDOW_H = 600  # taller to fit streaming text below orb
+_WINDOW_SIZE = _WINDOW_W  # backwards compat for overlay widths
 _MESSAGE_DISPLAY_MS = 5000
+
+# Stop words excluded from keyword extraction
+_STOP_WORDS: set[str] = {
+    "the", "a", "an", "is", "are", "was", "were", "be", "been", "being",
+    "have", "has", "had", "do", "does", "did", "will", "would", "could",
+    "should", "may", "might", "shall", "can", "need", "dare", "ought",
+    "i", "me", "my", "we", "our", "you", "your", "he", "him", "his",
+    "she", "her", "it", "its", "they", "them", "their", "that", "this",
+    "what", "which", "who", "whom", "how", "when", "where", "why",
+    "and", "but", "or", "nor", "not", "so", "if", "then", "than",
+    "too", "very", "just", "about", "above", "after", "before", "from",
+    "into", "of", "on", "to", "with", "for", "at", "by", "in", "up",
+    "out", "off", "over", "under", "again", "there", "here", "all",
+    "each", "every", "both", "few", "more", "most", "other", "some",
+    "such", "no", "only", "own", "same", "also", "as", "well", "like",
+    "really", "quite", "still", "even", "much", "many", "let", "got",
+    "get", "go", "going", "come", "take", "make", "know", "think",
+    "good", "great", "right", "okay", "yes", "yeah", "sure", "hey",
+    "hi", "hello", "thanks", "thank", "please", "sorry",
+}
+
+
+def _extract_keywords(text: str, max_kw: int = 6) -> list[str]:
+    """Pull the most important nouns/topics from a response.
+
+    Simple heuristic: split into words, drop stop words & short words,
+    prefer capitalised words and numbers, limit to *max_kw*.
+    """
+    words = _re.findall(r"[A-Za-z0-9°%$#@]+(?:'[a-z]+)?", text)
+    seen: set[str] = set()
+    scored: list[tuple[float, str]] = []
+    for w in words:
+        low = w.lower()
+        if low in _STOP_WORDS or len(w) < 3:
+            continue
+        if low in seen:
+            continue
+        seen.add(low)
+        # Score: capitalised > numbers > length
+        score = 0.0
+        if w[0].isupper():
+            score += 3.0
+        if any(c.isdigit() for c in w):
+            score += 2.0
+        score += min(len(w) / 4.0, 2.0)
+        scored.append((score, w))
+    scored.sort(key=lambda x: -x[0])
+    return [w for _, w in scored[:max_kw]]
 
 
 # ---------------------------------------------------------------------------
@@ -693,113 +748,262 @@ class _PainterSphereWidget(QWidget):
 
 
 # ═══════════════════════════════════════════════════════════════════════════
-# Temporary message overlay — shows for 5 seconds then fades out
+# Keyword bubbles — float around the orb
 # ═══════════════════════════════════════════════════════════════════════════
-class _MessageOverlay(QWidget):
-    """Floating message overlay below the sphere that auto-fades."""
+
+@dataclass
+class _Bubble:
+    """A single floating keyword bubble."""
+    text: str
+    # Orbit parameters (polar around sphere centre)
+    angle: float        # current angle in radians
+    radius: float       # distance from centre
+    speed: float        # radians per second
+    y_offset: float     # vertical offset from centre
+    opacity: float = 0.0
+    target_opacity: float = 1.0
+    born: float = 0.0   # time.monotonic() when created
+
+class _KeywordBubbles(QWidget):
+    """Draws keyword bubbles that orbit the sphere."""
 
     def __init__(self, parent: Optional[QWidget] = None) -> None:
         super().__init__(parent)
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
-        self.setFixedWidth(_WINDOW_SIZE - 40)
+        self.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
+        self._bubbles: list[_Bubble] = []
+        self._font = QFont("Inter", 11, QFont.Weight.Medium)
+        self._color = _STATE_COLORS[TrevoState.SPEAKING]
 
-        layout = QVBoxLayout(self)
-        layout.setContentsMargins(16, 12, 16, 12)
-        layout.setSpacing(6)
+    def set_keywords(self, keywords: list[str]) -> None:
+        """Replace current bubbles with new keywords."""
+        now = time.monotonic()
+        self._bubbles.clear()
+        n = len(keywords)
+        for i, kw in enumerate(keywords):
+            angle = (2 * math.pi * i / max(n, 1)) + random.uniform(-0.3, 0.3)
+            radius = random.uniform(0.55, 0.75)  # as fraction of widget half-width
+            speed = random.uniform(0.15, 0.4) * (1 if i % 2 == 0 else -1)
+            y_off = random.uniform(-0.3, 0.3)
+            self._bubbles.append(_Bubble(
+                text=kw, angle=angle, radius=radius, speed=speed,
+                y_offset=y_off, opacity=0.0, target_opacity=1.0, born=now,
+            ))
+        self.update()
 
-        # "You said:" label
-        self._user_label = QLabel("")
-        self._user_label.setWordWrap(True)
-        self._user_label.setStyleSheet(
-            "color: rgba(184,168,208,0.85); font-size: 12px; font-weight: 500; "
-            "background: transparent; font-family: 'Inter', 'Segoe UI Variable', sans-serif;"
-        )
-        layout.addWidget(self._user_label)
+    def add_keyword(self, kw: str) -> None:
+        """Add a single keyword bubble."""
+        now = time.monotonic()
+        n = len(self._bubbles) + 1
+        angle = random.uniform(0, 2 * math.pi)
+        radius = random.uniform(0.55, 0.75)
+        speed = random.uniform(0.15, 0.4) * random.choice([-1, 1])
+        y_off = random.uniform(-0.3, 0.3)
+        self._bubbles.append(_Bubble(
+            text=kw, angle=angle, radius=radius, speed=speed,
+            y_offset=y_off, opacity=0.0, target_opacity=1.0, born=now,
+        ))
 
-        # Response text
-        self._response_label = QLabel("")
-        self._response_label.setWordWrap(True)
-        self._response_label.setStyleSheet(
-            "color: #F5F3FF; font-size: 14px; font-weight: 400; "
-            "background: transparent; font-family: 'Inter', 'Segoe UI Variable', sans-serif;"
-        )
-        layout.addWidget(self._response_label)
+    def clear_bubbles(self) -> None:
+        """Fade out all bubbles."""
+        for b in self._bubbles:
+            b.target_opacity = 0.0
 
-        # Opacity effect for fade-out
-        self._opacity_effect = QGraphicsOpacityEffect(self)
-        self._opacity_effect.setOpacity(0.0)
-        self.setGraphicsEffect(self._opacity_effect)
+    def set_color(self, rgb: Tuple[int, int, int]) -> None:
+        self._color = rgb
 
-        # Timers
-        self._display_timer = QTimer(self)
-        self._display_timer.setSingleShot(True)
-        self._display_timer.timeout.connect(self._start_fade_out)
-
-        self._fade_timer = QTimer(self)
-        self._fade_timer.setInterval(16)  # ~60fps
-        self._fade_timer.timeout.connect(self._animate_fade)
-        self._fade_direction = 0  # 1=fade in, -1=fade out
-        self._current_opacity = 0.0
-
-        self.hide()
-
-    def show_message(self, user_text: str, response_text: str) -> None:
-        """Show a message pair, auto-hiding after 5 seconds."""
-        if user_text:
-            self._user_label.setText(f"You: \"{user_text}\"")
-            self._user_label.show()
-        else:
-            self._user_label.hide()
-
-        self._response_label.setText(response_text if response_text else "")
-
-        # Reset and show
-        self._display_timer.stop()
-        self._fade_timer.stop()
-        self._current_opacity = 0.0
-        self._opacity_effect.setOpacity(0.0)
-        self.show()
-
-        # Fade in
-        self._fade_direction = 1
-        self._fade_timer.start()
-
-        # Schedule fade-out after display duration
-        self._display_timer.start(_MESSAGE_DISPLAY_MS)
-
-    def _start_fade_out(self) -> None:
-        self._fade_direction = -1
-        self._fade_timer.start()
-
-    def _animate_fade(self) -> None:
-        step = 0.06  # ~1 second fade at 60fps
-        if self._fade_direction == 1:
-            self._current_opacity = min(1.0, self._current_opacity + step)
-            if self._current_opacity >= 1.0:
-                self._fade_timer.stop()
-        elif self._fade_direction == -1:
-            self._current_opacity = max(0.0, self._current_opacity - step)
-            if self._current_opacity <= 0.0:
-                self._fade_timer.stop()
-                self.hide()
-
-        self._opacity_effect.setOpacity(self._current_opacity)
+    def tick(self, dt: float) -> None:
+        """Advance animation. Call from parent's timer."""
+        alive: list[_Bubble] = []
+        for b in self._bubbles:
+            b.angle += b.speed * dt
+            # Fade in/out
+            if b.opacity < b.target_opacity:
+                b.opacity = min(b.target_opacity, b.opacity + dt * 2.0)
+            elif b.opacity > b.target_opacity:
+                b.opacity = max(b.target_opacity, b.opacity - dt * 2.0)
+            # Remove fully faded out
+            if b.opacity > 0.01 or b.target_opacity > 0:
+                alive.append(b)
+        self._bubbles = alive
+        self.update()
 
     def paintEvent(self, _event: object) -> None:  # noqa: N802
-        """Draw glassmorphic background."""
+        if not self._bubbles:
+            return
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+        painter.setFont(self._font)
+
+        cx = self.width() / 2.0
+        cy = self.height() / 2.0
+        half = min(cx, cy)
+
+        r, g, b = self._color
+
+        for bubble in self._bubbles:
+            if bubble.opacity < 0.02:
+                continue
+            # Position on elliptical orbit
+            bx = cx + math.cos(bubble.angle) * bubble.radius * half
+            by = cy + math.sin(bubble.angle) * bubble.radius * half * 0.5 + bubble.y_offset * half
+
+            alpha = int(bubble.opacity * 200)
+            bg_alpha = int(bubble.opacity * 140)
+
+            # Measure text
+            fm = QFontMetrics(self._font)
+            tw = fm.horizontalAdvance(bubble.text) + 16
+            th = fm.height() + 8
+
+            # Draw pill background
+            pill = QRectF(bx - tw / 2, by - th / 2, tw, th)
+            bg_color = QColor(r, g, b, bg_alpha // 3)
+            border_color = QColor(r, g, b, bg_alpha)
+            painter.setPen(QPen(border_color, 1.0))
+            painter.setBrush(bg_color)
+            painter.drawRoundedRect(pill, th / 2, th / 2)
+
+            # Draw text
+            painter.setPen(QColor(255, 255, 255, alpha))
+            painter.drawText(pill, Qt.AlignmentFlag.AlignCenter, bubble.text)
+
+        painter.end()
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# Streaming text display — word-by-word below the orb
+# ═══════════════════════════════════════════════════════════════════════════
+
+class _StreamingText(QWidget):
+    """Shows response text word by word as Trevo speaks."""
+
+    def __init__(self, parent: Optional[QWidget] = None) -> None:
+        super().__init__(parent)
+        self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
+
+        self._full_text: str = ""
+        self._visible_chars: int = 0
+        self._opacity: float = 0.0
+        self._target_opacity: float = 0.0
+
+        # Word-by-word reveal timer
+        self._reveal_timer = QTimer(self)
+        self._reveal_timer.setInterval(50)  # ~20 chars/sec
+        self._reveal_timer.timeout.connect(self._reveal_next)
+
+        self._font = QFont("Inter", 13, QFont.Weight.Normal)
+
+    def stream_text(self, text: str) -> None:
+        """Start streaming a full response word by word."""
+        self._full_text = text
+        self._visible_chars = 0
+        self._target_opacity = 1.0
+        self._reveal_timer.start()
+        self.show()
+        self.update()
+
+    def append_text(self, text: str) -> None:
+        """Append more text to the current stream (for real-time chunks)."""
+        self._full_text += text
+        if not self._reveal_timer.isActive():
+            self._reveal_timer.start()
+        self._target_opacity = 1.0
+        self.show()
+
+    def clear_text(self) -> None:
+        """Clear and fade out."""
+        self._reveal_timer.stop()
+        self._full_text = ""
+        self._visible_chars = 0
+        self._target_opacity = 0.0
+        self.update()
+
+    def get_full_text(self) -> str:
+        return self._full_text
+
+    def tick(self, dt: float) -> None:
+        """Advance fade animation."""
+        if self._opacity < self._target_opacity:
+            self._opacity = min(self._target_opacity, self._opacity + dt * 3.0)
+        elif self._opacity > self._target_opacity:
+            self._opacity = max(self._target_opacity, self._opacity - dt * 2.0)
+            if self._opacity < 0.02:
+                self.hide()
+        self.update()
+
+    def _reveal_next(self) -> None:
+        """Show the next chunk of characters."""
+        if self._visible_chars >= len(self._full_text):
+            self._reveal_timer.stop()
+            return
+        # Reveal in word-sized chunks for natural feel
+        next_space = self._full_text.find(" ", self._visible_chars + 1)
+        if next_space == -1:
+            self._visible_chars = len(self._full_text)
+        else:
+            self._visible_chars = next_space + 1
+        self.update()
+
+    def paintEvent(self, _event: object) -> None:  # noqa: N802
+        if not self._full_text or self._opacity < 0.02:
+            return
+
         painter = QPainter(self)
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
 
-        bg = QColor(15, 14, 23, 200)
-        border = QColor(30, 144, 255, 50)  # electric blue border
-
+        # Glassmorphic background
+        bg = QColor(15, 14, 23, int(self._opacity * 180))
+        border = QColor(30, 144, 255, int(self._opacity * 40))
+        rect = QRectF(8, 0, self.width() - 16, self.height())
         path = QPainterPath()
-        path.addRoundedRect(QRectF(self.rect()).adjusted(0.5, 0.5, -0.5, -0.5), 12.0, 12.0)
-
+        path.addRoundedRect(rect, 12.0, 12.0)
         painter.setPen(QPen(border, 1.0))
         painter.setBrush(bg)
         painter.drawPath(path)
+
+        # Draw visible portion of text
+        visible = self._full_text[:self._visible_chars]
+        if not visible:
+            painter.end()
+            return
+
+        text_rect = rect.adjusted(14, 8, -14, -8)
+        painter.setFont(self._font)
+        painter.setPen(QColor(245, 243, 255, int(self._opacity * 240)))
+        painter.drawText(
+            text_rect,
+            Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignTop | Qt.TextFlag.TextWordWrap,
+            visible,
+        )
+
+        # Blinking cursor at the end if still revealing
+        if self._visible_chars < len(self._full_text):
+            fm = QFontMetrics(self._font)
+            # Simple cursor — just a pipe after text
+            cursor_text = visible + "▌"
+            painter.setPen(QColor(30, 144, 255, int(self._opacity * 180)))
+            painter.drawText(
+                text_rect,
+                Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignTop | Qt.TextFlag.TextWordWrap,
+                cursor_text,
+            )
+
         painter.end()
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# Temporary message overlay — legacy compat (kept slim)
+# ═══════════════════════════════════════════════════════════════════════════
+class _MessageOverlay(QWidget):
+    """Floating message overlay — now delegates to streaming text + bubbles."""
+
+    def __init__(self, parent: Optional[QWidget] = None) -> None:
+        super().__init__(parent)
+        self.hide()  # not used directly anymore
+
+    def show_message(self, user_text: str, response_text: str) -> None:
+        pass  # handled by _StreamingText + _KeywordBubbles now
 
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -808,8 +1012,10 @@ class _MessageOverlay(QWidget):
 class TrevoModeWindow(QWidget):
     """Frameless, always-on-top Trevo Mode overlay — Ultron orb.
 
-    No chatbox. Shows temporary floating text overlay for the last
-    dictation + response, which auto-fades after 5 seconds.
+    Features:
+    - Keyword bubbles float around the orb (extracted key topics)
+    - Streaming word-by-word text below the orb as Trevo speaks
+    - Interruption clears text + bubbles and restarts listening
     """
 
     # Signals
@@ -828,25 +1034,27 @@ class TrevoModeWindow(QWidget):
             | Qt.WindowType.Tool
         )
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
-        self.setFixedSize(_WINDOW_SIZE, _WINDOW_SIZE)
+        self.setFixedSize(_WINDOW_W, _WINDOW_H)
 
         # ── State
         self._state = TrevoState.IDLE
         self._drag_pos: Optional[QPoint] = None
+        self._last_tick = time.monotonic()
 
         # ── Layout
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(12, 12, 12, 12)
+        layout.setContentsMargins(12, 12, 12, 4)
         layout.setSpacing(0)
 
-        # -- Sphere widget (takes up the full window)
+        # -- Sphere widget (orb area)
         if HAS_OPENGL:
             self._sphere: QWidget = _GLSphereWidget(self)
         else:
             self._sphere = _PainterSphereWidget(self)
 
         self._sphere.setMinimumSize(_SPHERE_SIZE, _SPHERE_SIZE)
-        layout.addWidget(self._sphere, stretch=1)
+        self._sphere.setMaximumHeight(_SPHERE_SIZE)
+        layout.addWidget(self._sphere, stretch=0)
 
         # Status label below sphere
         self._status_label = QLabel(_STATE_LABELS[TrevoState.IDLE])
@@ -857,18 +1065,43 @@ class TrevoModeWindow(QWidget):
         )
         layout.addWidget(self._status_label)
 
-        # -- Message overlay (floating, positioned below sphere)
+        # -- Streaming text area below status
+        self._streaming_text = _StreamingText(self)
+        self._streaming_text.setFixedHeight(150)
+        layout.addWidget(self._streaming_text, stretch=0)
+
+        # -- Keyword bubbles (overlaid on top of sphere area)
+        self._keyword_bubbles = _KeywordBubbles(self)
+        self._keyword_bubbles.setGeometry(0, 0, _WINDOW_W, _SPHERE_SIZE + 30)
+        self._keyword_bubbles.raise_()
+
+        # -- Legacy message overlay (compatibility shim)
         self._message_overlay = _MessageOverlay(self)
 
-        # ── Animation timer
+        # ── Animation timer — drives sphere, bubbles, and streaming text
         self._timer = QTimer(self)
         self._timer.setInterval(16)  # ~60 fps
-        self._timer.timeout.connect(self._sphere.update)
+        self._timer.timeout.connect(self._on_tick)
         self._timer.start()
+
+        # Auto-fade timer for text after speaking finishes
+        self._text_fade_timer = QTimer(self)
+        self._text_fade_timer.setSingleShot(True)
+        self._text_fade_timer.timeout.connect(self._fade_response)
+
+    def _on_tick(self) -> None:
+        """Master tick — advances all animations."""
+        now = time.monotonic()
+        dt = now - self._last_tick
+        self._last_tick = now
+        self._sphere.update()
+        self._keyword_bubbles.tick(dt)
+        self._streaming_text.tick(dt)
 
     # ── Public API
     def set_state(self, state: TrevoState) -> None:
         """Transition to a new visual state."""
+        prev_state = self._state
         self._state = state
         self._sphere.set_state(state)  # type: ignore[attr-defined]
         self._status_label.setText(_STATE_LABELS.get(state, ""))
@@ -878,16 +1111,54 @@ class TrevoModeWindow(QWidget):
             f"background: transparent; font-family: 'Inter', 'Segoe UI Variable', sans-serif;"
         )
 
+        # On interruption: user starts speaking → clear response + bubbles
+        if state == TrevoState.LISTENING and prev_state == TrevoState.SPEAKING:
+            self.clear_response()
+
+        # Update bubble color to match state
+        self._keyword_bubbles.set_color(
+            _STATE_COLORS.get(state, _STATE_COLORS[TrevoState.IDLE])
+        )
+
+    def show_response(self, text: str) -> None:
+        """Stream a response word-by-word + extract keyword bubbles."""
+        self._text_fade_timer.stop()
+        # Extract keywords and show as floating bubbles
+        keywords = _extract_keywords(text)
+        self._keyword_bubbles.set_keywords(keywords)
+        # Stream the full text word by word
+        self._streaming_text.stream_text(text)
+
+    def append_response(self, text: str) -> None:
+        """Append text to the current streaming response (for real-time chunks)."""
+        self._streaming_text.append_text(text)
+        # Extract new keywords from appended text
+        new_kw = _extract_keywords(text, max_kw=2)
+        for kw in new_kw:
+            self._keyword_bubbles.add_keyword(kw)
+
+    def clear_response(self) -> None:
+        """Clear streaming text and fade out bubbles (on interruption)."""
+        self._text_fade_timer.stop()
+        self._streaming_text.clear_text()
+        self._keyword_bubbles.clear_bubbles()
+
+    def finish_speaking(self) -> None:
+        """Called when Trevo finishes speaking — schedule fade after delay."""
+        self._text_fade_timer.start(_MESSAGE_DISPLAY_MS)
+
+    def _fade_response(self) -> None:
+        """Auto-fade response text after display duration."""
+        self._streaming_text.clear_text()
+        self._keyword_bubbles.clear_bubbles()
+
     def show_message(self, user_text: str = "", response_text: str = "") -> None:
-        """Show a temporary message overlay (auto-fades after 5 seconds)."""
-        # Position overlay at bottom of window
-        overlay_x = (self.width() - self._message_overlay.width()) // 2
-        overlay_y = self.height() - 120
-        self._message_overlay.move(overlay_x, overlay_y)
-        self._message_overlay.show_message(user_text, response_text)
+        """Show a response — routes to streaming text + keyword bubbles."""
+        if response_text:
+            self.show_response(response_text)
 
     def add_message(self, text: str, sender: str = "user") -> None:
-        """Compatibility shim — routes to show_message overlay.
+        """Compatibility shim — routes to streaming text.
 
         When sender is 'user', stores text for pairing with response.
         When sender is 'trevo', shows both together.
@@ -895,13 +1166,12 @@ class TrevoModeWindow(QWidget):
         if sender == "user":
             self._last_user_text = text
         else:
-            user = getattr(self, "_last_user_text", "")
-            self.show_message(user, text)
+            self.show_response(text)
             self._last_user_text = ""
 
     def clear_chat(self) -> None:
-        """Compatibility shim — hides message overlay."""
-        self._message_overlay.hide()
+        """Clear all response text and bubbles."""
+        self.clear_response()
 
     def show_sphere(self) -> None:
         """Center on screen and show."""
@@ -941,6 +1211,11 @@ class TrevoModeWindow(QWidget):
         painter.drawRoundedRect(
             QRectF(self.rect()).adjusted(0.5, 0.5, -0.5, -0.5), 20.0, 20.0
         )
+
+        # Subtle divider line between sphere area and text area
+        div_y = _SPHERE_SIZE + 44  # below status label
+        painter.setPen(QPen(QColor(30, 144, 255, 20), 1.0))
+        painter.drawLine(20, div_y, self.width() - 20, div_y)
 
         painter.end()
 

@@ -406,8 +406,14 @@ def main() -> None:
 
         # Wire signals
         session.audio_response.connect(_audio_player.play_chunk)
-        session.text_response.connect(lambda t: trevo_mode.add_message(t, "trevo") if trevo_mode.isVisible() else None)
-        session.user_transcript.connect(lambda t: trevo_mode.add_message(t, "user") if trevo_mode.isVisible() else None)
+        # Streaming text: append each chunk word-by-word as it arrives
+        session.text_response.connect(
+            lambda t: trevo_mode.append_response(t) if trevo_mode.isVisible() else None
+        )
+        # When user speaks (interruption), clear current response
+        session.user_transcript.connect(
+            lambda t: trevo_mode.clear_response() if trevo_mode.isVisible() else None
+        )
 
         from ui.trevo_mode import TrevoState
 
@@ -427,9 +433,11 @@ def main() -> None:
             trevo._audio_capture.start()
 
         session.session_started.connect(_on_session_started)
-        session.turn_complete.connect(lambda: (
-            trevo_mode.set_state(TrevoState.LISTENING) if trevo_mode.isVisible() else None
-        ))
+        def _on_turn_complete():
+            if trevo_mode.isVisible():
+                trevo_mode.finish_speaking()
+                trevo_mode.set_state(TrevoState.LISTENING)
+        session.turn_complete.connect(_on_turn_complete)
         session.session_error.connect(lambda msg: (
             logger.error("Gemini Live error: {}", msg),
             trevo.error_occurred.emit(f"Gemini Live: {msg}"),
@@ -528,8 +536,8 @@ def main() -> None:
         from ui.trevo_mode import TrevoState
         if trevo_mode.isVisible():
             trevo_mode.set_state(TrevoState.SPEAKING)
-            # Show response in temporary overlay (pairs with last user text)
-            trevo_mode.add_message(text, "trevo")
+            # Stream response with keyword bubbles
+            trevo_mode.show_response(text)
 
         def _speak():
             try:
@@ -541,7 +549,10 @@ def main() -> None:
                 # After speaking, go back to listening if Trevo Mode is active
                 if trevo_mode.isVisible():
                     from PyQt6.QtCore import QTimer
-                    QTimer.singleShot(0, lambda: trevo_mode.set_state(TrevoState.LISTENING))
+                    QTimer.singleShot(0, lambda: (
+                        trevo_mode.finish_speaking(),
+                        trevo_mode.set_state(TrevoState.LISTENING),
+                    ))
                     # Auto-restart recording for continuous conversation
                     if trevo.state == AppState.IDLE:
                         QTimer.singleShot(200, trevo.start_recording)
