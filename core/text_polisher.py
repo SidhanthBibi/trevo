@@ -103,6 +103,49 @@ async def _call_openai(prompt: str, system: str, model: str, api_key: str) -> st
     return response.choices[0].message.content.strip()
 
 
+async def _call_groq(prompt: str, system: str, model: str, api_key: str) -> str:
+    """Call Groq API (OpenAI-compatible)."""
+    try:
+        import openai  # noqa: F811
+    except ImportError:
+        raise RuntimeError("openai package is not installed. Run: pip install openai")
+
+    client = openai.AsyncOpenAI(api_key=api_key, base_url="https://api.groq.com/openai/v1")
+    response = await client.chat.completions.create(
+        model=model,
+        messages=[
+            {"role": "system", "content": system},
+            {"role": "user", "content": prompt},
+        ],
+        temperature=0.3,
+        max_tokens=2048,
+    )
+    return response.choices[0].message.content.strip()
+
+
+async def _call_gemini(prompt: str, system: str, model: str, api_key: str) -> str:
+    """Call Google Gemini API via OpenAI-compatible endpoint."""
+    try:
+        import openai  # noqa: F811
+    except ImportError:
+        raise RuntimeError("openai package is not installed. Run: pip install openai")
+
+    client = openai.AsyncOpenAI(
+        api_key=api_key,
+        base_url="https://generativelanguage.googleapis.com/v1beta/openai/",
+    )
+    response = await client.chat.completions.create(
+        model=model,
+        messages=[
+            {"role": "system", "content": system},
+            {"role": "user", "content": prompt},
+        ],
+        temperature=0.3,
+        max_tokens=2048,
+    )
+    return response.choices[0].message.content.strip()
+
+
 async def _call_anthropic(prompt: str, system: str, model: str, api_key: str) -> str:
     """Call Anthropic messages API."""
     try:
@@ -169,6 +212,8 @@ class TextPolisher:
         "openai": "gpt-4o-mini",
         "anthropic": "claude-3-5-haiku-20241022",
         "ollama": "llama3.2",
+        "groq": "llama-3.3-70b-versatile",
+        "gemini": "gemini-2.0-flash",
     }
 
     def __init__(
@@ -238,6 +283,10 @@ class TextPolisher:
     async def _call_llm(self, prompt: str, system: str) -> str:
         if self.provider == "openai":
             return await _call_openai(prompt, system, self.model, self._require_key())
+        elif self.provider == "groq":
+            return await _call_groq(prompt, system, self.model, self._require_key())
+        elif self.provider == "gemini":
+            return await _call_gemini(prompt, system, self.model, self._require_key())
         elif self.provider == "anthropic":
             return await _call_anthropic(prompt, system, self.model, self._require_key())
         elif self.provider == "ollama":

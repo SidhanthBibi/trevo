@@ -41,12 +41,14 @@ def _get_project_config_path() -> Path:
 
 @dataclass
 class GeneralSettings:
-    hotkey: str = "ctrl+shift+space"
-    command_hotkey: str = "ctrl+shift+c"
+    hotkey: str = "right ctrl"  # Right Ctrl tap to toggle dictation
+    command_hotkey: str = "ctrl+shift+t"  # Ctrl+Shift+T for Trevo Mode
     mode: str = "toggle"
     auto_start: bool = False
     start_minimized: bool = True
     theme: str = "dark"
+    wake_word_enabled: bool = False   # requires openwakeword installed
+    clap_detection_enabled: bool = False  # requires audio always-on
 
 
 @dataclass
@@ -58,7 +60,7 @@ class WhisperSettings:
 
 @dataclass
 class STTSettings:
-    engine: str = "groq"
+    engine: str = "google_cloud"
     language: str = "auto"
     openai_api_key: str = ""
     groq_api_key: str = ""

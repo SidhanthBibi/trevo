@@ -1,22 +1,21 @@
 """Conversational AI engine for trevo.
 
-This is the brain of trevo. Instead of just transcribing speech,
-it understands INTENT — distinguishing between:
+This is the brain of trevo. Every utterance goes through the LLM which:
+1. Understands context (what app you're in, what you've said before)
+2. Detects intent naturally (no rigid regex — "forget the previous line" just works)
+3. Produces the right output (cleaned text, transformation, or action)
 
-1. Content dictation: "The quarterly results show a 15% increase..."
-2. Instructions: "...now make that a formal letter"
-3. Editing: "replace the first paragraph with a summary"
-4. Meta commands: "undo", "read it back", "start over"
+The LLM sees the full conversation history and current draft, so it can handle
+complex instructions like "add a bullet point", "next point", "delete that last
+sentence", "make it sound more professional" — all in natural language.
 
-The engine buffers the entire conversation, detects when the user
-switches from content to instruction, and routes accordingly.
-
-Runs 100% locally via Ollama, or optionally via cloud APIs.
+Fast regex patterns still handle trivial meta commands (undo, clear) to save
+an API call when the intent is unambiguous.
 """
 
 from __future__ import annotations
 
-import asyncio
+import json
 import re
 from dataclasses import dataclass, field
 from datetime import datetime
@@ -33,10 +32,10 @@ from utils.logger import logger
 class Intent(Enum):
     """What the user is trying to do."""
     DICTATE = "dictate"           # Just type what I say
-    INSTRUCT = "instruct"         # Transform/generate text based on instruction
-    EDIT = "edit"                 # Modify the last output
-    META = "meta"                 # Undo, read back, start over, etc.
-    CONVERSATION = "conversation" # Multi-turn: content + instruction mixed
+    INSTRUCT = "instruct"         # Transform/edit/act on text
+    META = "meta"                 # Undo, read back, start over
+    DESKTOP = "desktop"           # Open app, check mail, system command
+    CONVERSATION = "conversation" # Trevo Mode back-and-forth chat
 
 
 @dataclass
@@ -52,9 +51,9 @@ class Turn:
 class ConversationState:
     """Tracks the full conversation context."""
     turns: list[Turn] = field(default_factory=list)
-    current_draft: str = ""         # The latest generated/dictated text
-    draft_history: list[str] = field(default_factory=list)  # For undo
-    active_context: str = "generic"  # email, chat, code, etc.
+    current_draft: str = ""
+    draft_history: list[str] = field(default_factory=list)
+    active_context: str = "generic"
 
     def add_turn(self, text: str, intent: Intent, is_user: bool = True) -> None:
         self.turns.append(Turn(text=text, intent=intent, is_user=is_user))
@@ -77,92 +76,83 @@ class ConversationState:
 
     @property
     def conversation_summary(self) -> str:
-        """Build a summary of the conversation for LLM context."""
         parts = []
-        for turn in self.turns[-10:]:  # Last 10 turns for context window
+        for turn in self.turns[-10:]:
             role = "User" if turn.is_user else "Assistant"
             parts.append(f"{role}: {turn.text}")
         return "\n".join(parts)
 
 
 # ---------------------------------------------------------------------------
-# Instruction pattern matching (fast local detection before LLM)
+# Fast local detection for unambiguous meta commands (saves an API call)
 # ---------------------------------------------------------------------------
 
-_INSTRUCTION_PATTERNS: list[tuple[str, str, dict]] = [
-    # (regex_pattern, action_name, extra_params)
-    (r"(?:make|turn|convert)\s+(?:it|this|that)\s+(?:into\s+)?(?:a\s+)?(?:formal|professional)\s*(?:letter|email|message)?", "make_formal", {}),
-    (r"(?:make|turn|convert)\s+(?:it|this|that)\s+(?:into\s+)?(?:a\s+)?(?:casual|informal)\s*(?:message|text)?", "make_casual", {}),
-    (r"(?:make|turn|convert)\s+(?:it|this|that)\s+(?:into\s+)?(?:a\s+)?(?:claude\s*code|claude)\s+(?:master\s+)?prompt", "make_prompt", {}),
-    (r"(?:make|turn|convert)\s+(?:it|this|that)\s+(?:into\s+)?(?:a\s+)?prompt", "make_prompt", {}),
-    (r"(?:make|turn|convert)\s+(?:it|this|that)\s+(?:into\s+)?(?:a\s+)?(?:bullet|bulleted)\s*(?:points?|list)?", "make_bullets", {}),
-    (r"(?:make|turn|convert)\s+(?:it|this|that)\s+(?:into\s+)?(?:a\s+)?(?:numbered|ordered)\s*list", "make_numbered", {}),
-    (r"(?:make|turn|convert)\s+(?:it|this|that)\s+(?:into\s+)?(?:a\s+)?(?:email|mail)", "make_email", {}),
-    (r"(?:make|turn|convert)\s+(?:it|this|that)\s+(?:into\s+)?(?:a\s+)?(?:code\s*comment|docstring)", "make_code_comment", {}),
-    (r"(?:make|turn|convert)\s+(?:it|this|that)\s+(?:into\s+)?(?:a\s+)?(?:tweet|post|social\s*media)", "make_social", {}),
-    (r"(?:make|turn)\s+(?:it|this|that)\s+(?:shorter|more\s+concise|brief)", "make_shorter", {}),
-    (r"(?:make|turn)\s+(?:it|this|that)\s+(?:longer|more\s+detailed|elaborate)", "make_longer", {}),
-    (r"(?:fix|correct)\s+(?:the\s+)?grammar", "fix_grammar", {}),
-    (r"(?:summarize|summarise)\s+(?:it|this|that)", "summarize", {}),
-    (r"translate\s+(?:it|this|that)?\s*(?:to|into)\s+(\w+)", "translate", {}),
-    (r"replace\s+(.+?)\s+with\s+(.+)", "replace", {}),
-    (r"(?:remove|delete)\s+(?:the\s+)?(.+)", "remove", {}),
-    (r"(?:add|insert)\s+(.+?)\s+(?:at\s+the\s+)?(?:beginning|start|end|top|bottom)", "insert", {}),
-    (r"(?:now\s+)?(?:send|type|paste|output|write)\s+(?:it|this|that)", "output", {}),
-    (r"(?:read|say)\s+(?:it|that)\s+back", "read_back", {}),
-    (r"start\s+over|clear|reset|new\s+(?:text|draft)", "clear", {}),
-    (r"^undo$|^go\s+back$|^revert$", "undo", {}),
-    (r"wake up.+daddy.+home|good morning trevo|hey trevo|hello trevo", "morning_briefing", {}),
-]
-
-_COMPILED_PATTERNS = [(re.compile(p, re.IGNORECASE), a, e) for p, a, e in _INSTRUCTION_PATTERNS]
+def _detect_fast_meta(text: str) -> Optional[str]:
+    """Return action name if text is an unambiguous meta command, else None."""
+    t = text.strip().lower()
+    if t in ("undo", "go back", "revert"):
+        return "undo"
+    if t in ("start over", "clear", "reset", "new draft"):
+        return "clear"
+    if re.match(r"^(?:read|say)\s+(?:it|that)\s+back$", t):
+        return "read_back"
+    if re.match(r"^(?:wake up.+daddy.+home|good morning trevo|hey trevo|hello trevo)$", t):
+        return "morning_briefing"
+    return None
 
 
-def detect_intent_local(text: str) -> tuple[Intent, str, dict]:
-    """Fast local intent detection using regex patterns.
+# ---------------------------------------------------------------------------
+# System prompt for the LLM brain
+# ---------------------------------------------------------------------------
 
-    Returns (intent, action, params).
-    """
-    text_stripped = text.strip()
+_SYSTEM_PROMPT = """\
+You are the brain of Trevo, a voice-to-text desktop assistant. The user speaks into \
+their microphone and you receive their transcribed speech. Your job is to understand \
+what they want and respond with a JSON action.
 
-    # Check wake/activation phrases
-    if re.match(r"(?:wake up.+daddy.+home|good morning trevo|hey trevo|hello trevo)", text_stripped, re.IGNORECASE):
-        return Intent.META, "morning_briefing", {}
+## Context
+- App context: {app_context}
+- Current draft (what was last typed): {current_draft}
+- Conversation history:
+{history}
 
-    # Check meta commands first
-    if text_stripped.lower() in ("undo", "go back", "revert"):
-        return Intent.META, "undo", {}
-    if text_stripped.lower() in ("start over", "clear", "reset"):
-        return Intent.META, "clear", {}
-    if re.match(r"(?:read|say)\s+(?:it|that)\s+back", text_stripped, re.IGNORECASE):
-        return Intent.META, "read_back", {}
+## Rules
+1. If the user is DICTATING content (they want text typed), clean up filler words \
+(um, uh, like, you know), fix grammar, handle self-corrections, and output the \
+polished text. Preserve their meaning exactly.
 
-    # Check instruction patterns
-    for pattern, action, extra in _COMPILED_PATTERNS:
-        match = pattern.search(text_stripped)
-        if match:
-            params = dict(extra)
-            # Extract capture groups if any
-            if match.groups():
-                params["captures"] = list(match.groups())
-            return Intent.INSTRUCT, action, params
+2. If the user gives an INSTRUCTION about their text (e.g. "forget the previous line", \
+"add a bullet point", "next point", "make it formal", "delete that", "change the \
+tone"), apply the instruction to the current draft and output the modified text.
 
-    # Check if text ENDS with an instruction (content + instruction mixed)
-    # Pattern: user says content, then says "now make it..."
-    for trigger in ["now ", "and ", "then ", "ok ", "okay ", "alright "]:
-        if trigger in text_stripped.lower():
-            # Split at the trigger point and check if the tail is an instruction
-            parts = text_stripped.lower().split(trigger, 1)
-            if len(parts) == 2:
-                tail = parts[1]
-                for pattern, action, extra in _COMPILED_PATTERNS:
-                    if pattern.search(tail):
-                        params = dict(extra)
-                        params["content"] = text_stripped[:text_stripped.lower().index(trigger)].strip()
-                        return Intent.CONVERSATION, action, params
+3. If the user's speech MIXES content and instructions (e.g. "The quarterly results \
+were great, now make it a formal email"), process both: add the content to the draft, \
+then apply the instruction.
 
-    # Default: it's dictation content
-    return Intent.DICTATE, "dictate", {}
+4. For desktop commands (e.g. "open Chrome", "check my email", "what's the weather"), \
+respond with action "desktop_command".
+
+5. For conversational queries in Trevo Mode (e.g. "what do you think about...", \
+"tell me a joke"), respond with action "conversation".
+
+## Response Format
+ALWAYS respond with valid JSON only, no other text:
+{{
+  "action": "inject_text" | "replace_all" | "desktop_command" | "conversation" | "noop",
+  "text": "the output text to type/display",
+  "intent": "dictate" | "instruct" | "desktop" | "conversation",
+  "message": "optional short status message for the UI",
+  "voice_response": "optional text to speak aloud via TTS (for Trevo Mode)"
+}}
+
+Action meanings:
+- "inject_text": Append/type this text at the cursor position
+- "replace_all": Replace the entire current draft with this new text
+- "desktop_command": Execute a desktop action (text field contains the command description)
+- "conversation": Conversational response (text is empty, voice_response has the reply)
+- "noop": Do nothing
+
+CRITICAL: Return ONLY the JSON object. No markdown, no explanation, no code fences."""
 
 
 # ---------------------------------------------------------------------------
@@ -170,15 +160,7 @@ def detect_intent_local(text: str) -> tuple[Intent, str, dict]:
 # ---------------------------------------------------------------------------
 
 class ConversationEngine:
-    """The brain of trevo — understands conversation context and intent.
-
-    Supports three LLM backends (all optional — works without any API key
-    using Ollama locally):
-
-    1. Ollama (local, free, recommended) — requires Ollama installed
-    2. OpenAI (cloud, paid)
-    3. Anthropic (cloud, paid)
-    """
+    """The brain of trevo — LLM-powered intent detection and text processing."""
 
     def __init__(
         self,
@@ -186,27 +168,36 @@ class ConversationEngine:
         api_key: Optional[str] = None,
         model: Optional[str] = None,
         ollama_url: str = "http://localhost:11434",
+        snippets: Optional[dict[str, str]] = None,
     ) -> None:
         self.provider = provider.lower()
         self.api_key = api_key
         self.ollama_url = ollama_url
+        self._snippets: dict[str, str] = snippets or {}
 
-        # Default models per provider
         _defaults = {
             "ollama": "llama3.2",
             "openai": "gpt-4o-mini",
             "anthropic": "claude-3-5-haiku-20241022",
-            "groq": "llama-3.3-70b-versatile",    # Free tier: 30 req/min
-            "gemini": "gemini-2.0-flash",           # Free tier: 15 req/min
+            "groq": "llama-3.3-70b-versatile",
+            "gemini": "gemini-2.0-flash",
         }
         self.model = model or _defaults.get(self.provider, "llama3.2")
-
         self.state = ConversationState()
+        self._trevo_mode = False  # True when JARVIS sphere is active
 
         logger.info(
             "ConversationEngine initialised (provider={}, model={})",
             self.provider, self.model,
         )
+
+    @property
+    def trevo_mode(self) -> bool:
+        return self._trevo_mode
+
+    @trevo_mode.setter
+    def trevo_mode(self, value: bool) -> None:
+        self._trevo_mode = value
 
     # ------------------------------------------------------------------
     # Main entry point
@@ -217,71 +208,170 @@ class ConversationEngine:
         raw_text: str,
         app_context: str = "generic",
     ) -> ConversationResult:
-        """Process a speech utterance and return the appropriate action.
-
-        This is the main method — call it with raw STT output and it figures
-        out what to do.
-
-        Returns a ConversationResult with:
-        - action: what to do (inject_text, replace_text, read_back, etc.)
-        - text: the text to inject/display
-        - intent: the detected intent
-        """
+        """Process a speech utterance through the LLM brain."""
         if not raw_text or not raw_text.strip():
             return ConversationResult(action="noop", text="", intent=Intent.DICTATE)
 
         text = raw_text.strip()
         self.state.active_context = app_context
 
-        # Step 1: Local intent detection (fast, no LLM needed)
-        intent, action, params = detect_intent_local(text)
+        # Fast path: unambiguous meta commands (no LLM call needed)
+        fast_action = _detect_fast_meta(text)
+        if fast_action:
+            return self._handle_meta(fast_action)
 
-        logger.info("Intent: {} / Action: {} / Params: {}", intent.value, action, params)
-
-        # Step 2: Route based on intent
-        if intent == Intent.DICTATE:
-            return await self._handle_dictation(text)
-
-        elif intent == Intent.META:
-            return self._handle_meta(action)
-
-        elif intent == Intent.INSTRUCT:
-            return await self._handle_instruction(text, action, params)
-
-        elif intent == Intent.CONVERSATION:
-            return await self._handle_conversation(text, action, params)
-
-        return ConversationResult(action="inject_text", text=text, intent=intent)
-
-    # ------------------------------------------------------------------
-    # Intent handlers
-    # ------------------------------------------------------------------
-
-    async def _handle_dictation(self, text: str) -> ConversationResult:
-        """User is just dictating content — clean it up and inject."""
-        # Add to conversation history
-        self.state.add_turn(text, Intent.DICTATE)
-
-        # Clean up the text (basic filler removal)
-        from utils.text_utils import remove_filler_words
-        cleaned = remove_filler_words(text)
-
-        # If we have an LLM available, do light polishing
+        # Everything else goes through the LLM
         try:
-            polished = await self._polish_text(cleaned)
-        except Exception:
-            polished = cleaned
+            result = await self._process_with_llm(text)
+            return result
+        except Exception as exc:
+            logger.error(
+                "LLM processing failed ({}: {}) — falling back to raw inject. "
+                "Check your API key in Settings → AI Polishing.",
+                type(exc).__name__, exc,
+            )
+            # Fallback: just inject the raw text
+            self.state.add_turn(text, Intent.DICTATE)
+            self.state.push_draft(text)
+            return ConversationResult(
+                action="inject_text", text=text, intent=Intent.DICTATE,
+                message=f"⚠ LLM unavailable ({type(exc).__name__}), raw text injected",
+            )
 
-        self.state.push_draft(polished)
+    async def _process_with_llm(self, text: str) -> ConversationResult:
+        """Send the utterance to the LLM with full context."""
+        history = self.state.conversation_summary or "(no prior conversation)"
+        draft = self.state.current_draft or "(no current draft)"
 
-        return ConversationResult(
-            action="inject_text",
-            text=polished,
-            intent=Intent.DICTATE,
+        system = _SYSTEM_PROMPT.format(
+            app_context=self.state.active_context,
+            current_draft=draft,
+            history=history,
         )
 
+        # Inject user's personal snippets so the LLM can auto-fill them
+        if self._snippets:
+            snippet_lines = "\n".join(
+                f"- {k.replace('_', ' ')}: {v}" for k, v in self._snippets.items() if v
+            )
+            if snippet_lines:
+                system += (
+                    "\n\n## User's Personal Info / Snippets\n"
+                    "CRITICAL: When the user says ANY of these trigger phrases, you MUST "
+                    "replace them with the exact values below — never type the phrase literally.\n"
+                    f"{snippet_lines}\n\n"
+                    "Trigger rules:\n"
+                    "- 'my phone number' / 'my number' / 'call me at' → use the phone value\n"
+                    "- 'my name' / 'my name is' / 'I am' → use the name value\n"
+                    "- 'my email' / 'email me at' / 'my email address' → use the email value\n"
+                    "- Generic mentions (e.g. 'a phone number') stay as literal text\n"
+                    "- Only replace when the user clearly refers to THEIR OWN info with 'my' / 'I'"
+                )
+
+        # In Trevo Mode, bias toward conversation with voice responses
+        if self._trevo_mode:
+            system += (
+                "\n\n## TREVO MODE ACTIVE\n"
+                "You are in Trevo Mode (JARVIS-like voice assistant). "
+                "ALWAYS include a natural voice_response field — speak back to the user. "
+                "For dictation, confirm what you typed (e.g. \"Got it, I've typed that for you.\"). "
+                "For instructions, confirm the action (e.g. \"Done, I've made it more formal.\"). "
+                "For conversation, respond naturally and helpfully. "
+                "For desktop commands, confirm what you're doing (e.g. \"Opening Chrome for you.\"). "
+                "Keep voice_response concise and natural — like a real assistant speaking."
+            )
+
+        user_msg = f"User said: {text}"
+
+        raw_response = await self._call_llm_chat(system, user_msg)
+
+        # Parse the JSON response
+        result = self._parse_llm_response(raw_response, text)
+
+        # Update conversation state
+        intent = Intent(result.intent.value) if isinstance(result.intent, Intent) else Intent.DICTATE
+        self.state.add_turn(text, intent)
+
+        if result.action in ("inject_text", "replace_all") and result.text:
+            self.state.push_draft(result.text)
+
+        return result
+
+    def _parse_llm_response(self, raw: str, original_text: str) -> ConversationResult:
+        """Parse JSON response from the LLM, with robust fallback."""
+        # Strip markdown code fences if present
+        cleaned = raw.strip()
+        if cleaned.startswith("```"):
+            # Remove ```json\n...\n```
+            lines = cleaned.split("\n")
+            if lines[0].startswith("```"):
+                lines = lines[1:]
+            if lines and lines[-1].strip() == "```":
+                lines = lines[:-1]
+            cleaned = "\n".join(lines).strip()
+
+        try:
+            data = json.loads(cleaned)
+        except json.JSONDecodeError:
+            # LLM didn't return valid JSON — treat response as polished text
+            logger.warning("LLM returned non-JSON response, using as polished text")
+            fallback_text = cleaned if cleaned else original_text
+            return ConversationResult(
+                action="inject_text",
+                text=self._expand_snippets(fallback_text),
+                intent=Intent.DICTATE,
+            )
+
+        action = data.get("action", "inject_text")
+        text = data.get("text", "")
+        intent_str = data.get("intent", "dictate")
+        message = data.get("message", "")
+        voice = data.get("voice_response", "")
+
+        # Map intent string to enum
+        try:
+            intent = Intent(intent_str)
+        except ValueError:
+            intent = Intent.DICTATE
+
+        return ConversationResult(
+            action=action,
+            text=self._expand_snippets(text) if text else text,
+            intent=intent,
+            message=message,
+            voice_response=voice,
+        )
+
+    # ------------------------------------------------------------------
+    # Snippet post-processing (regex fallback for LLM misses)
+    # ------------------------------------------------------------------
+
+    def _expand_snippets(self, text: str) -> str:
+        """Replace 'my phone number', 'my name', etc. with actual snippet values."""
+        if not self._snippets or not text:
+            return text
+
+        _TRIGGER_PATTERNS: dict[str, list[str]] = {
+            "my_name": [r"\bmy name\b", r"\bmy full name\b"],
+            "my_phone": [r"\bmy (?:phone )?number\b", r"\bmy phone\b",
+                         r"\bcall me at\b"],
+            "my_email": [r"\bmy email(?:\s+address)?\b", r"\bemail me at\b"],
+        }
+
+        for key, patterns in _TRIGGER_PATTERNS.items():
+            value = self._snippets.get(key, "")
+            if not value:
+                continue
+            for pattern in patterns:
+                text = re.sub(pattern, value, text, flags=re.IGNORECASE)
+
+        return text
+
+    # ------------------------------------------------------------------
+    # Meta commands (handled locally, no LLM)
+    # ------------------------------------------------------------------
+
     def _handle_meta(self, action: str) -> ConversationResult:
-        """Handle meta commands like undo, clear, read back."""
         if action == "undo":
             previous = self.state.undo_draft()
             if previous is not None:
@@ -292,378 +382,181 @@ class ConversationEngine:
                     message="Reverted to previous version",
                 )
             return ConversationResult(
-                action="noop",
-                text="",
-                intent=Intent.META,
+                action="noop", text="", intent=Intent.META,
                 message="Nothing to undo",
             )
 
-        elif action == "clear":
+        if action == "clear":
             self.state.clear()
             return ConversationResult(
-                action="clear",
-                text="",
-                intent=Intent.META,
+                action="clear", text="", intent=Intent.META,
                 message="Cleared — starting fresh",
             )
 
-        elif action == "read_back":
+        if action == "read_back":
             return ConversationResult(
                 action="read_back",
                 text=self.state.current_draft,
                 intent=Intent.META,
                 message=self.state.current_draft or "No draft to read back",
+                voice_response=self.state.current_draft or "No draft to read back",
+            )
+
+        if action == "morning_briefing":
+            return ConversationResult(
+                action="morning_briefing", text="", intent=Intent.META,
+                message="Starting morning briefing",
+                voice_response="Good morning! Let me get your briefing ready.",
             )
 
         return ConversationResult(action="noop", text="", intent=Intent.META)
 
-    async def _handle_instruction(
-        self, text: str, action: str, params: dict
-    ) -> ConversationResult:
-        """Handle transformation instructions on the current draft.
-
-        e.g. "make it a formal letter", "translate to Spanish"
-        """
-        self.state.add_turn(text, Intent.INSTRUCT)
-        draft = self.state.current_draft
-
-        if not draft:
-            return ConversationResult(
-                action="noop",
-                text="",
-                intent=Intent.INSTRUCT,
-                message="No text to transform — dictate something first",
-            )
-
-        # Special case: replace
-        if action == "replace" and params.get("captures"):
-            captures = params["captures"]
-            if len(captures) >= 2:
-                old, new = captures[0], captures[1]
-                result = draft.replace(old, new)
-                self.state.push_draft(result)
-                return ConversationResult(
-                    action="replace_all",
-                    text=result,
-                    intent=Intent.EDIT,
-                    message=f"Replaced '{old}' with '{new}'",
-                )
-
-        # Special case: remove
-        if action == "remove" and params.get("captures"):
-            to_remove = params["captures"][0]
-            result = draft.replace(to_remove, "").strip()
-            result = re.sub(r"\s{2,}", " ", result)
-            self.state.push_draft(result)
-            return ConversationResult(
-                action="replace_all",
-                text=result,
-                intent=Intent.EDIT,
-                message=f"Removed '{to_remove}'",
-            )
-
-        # For all other instructions, use the LLM
-        transformed = await self._transform_text(draft, action, params)
-        self.state.push_draft(transformed)
-
-        return ConversationResult(
-            action="replace_all",
-            text=transformed,
-            intent=Intent.INSTRUCT,
-            message=f"Applied: {action}",
-        )
-
-    async def _handle_conversation(
-        self, text: str, action: str, params: dict
-    ) -> ConversationResult:
-        """Handle mixed content + instruction in a single utterance.
-
-        e.g. "The quarterly results were great, now make it a formal report"
-        """
-        content = params.get("content", "")
-        self.state.add_turn(text, Intent.CONVERSATION)
-
-        if content:
-            # First, process the content part
-            from utils.text_utils import remove_filler_words
-            cleaned_content = remove_filler_words(content)
-
-            try:
-                polished_content = await self._polish_text(cleaned_content)
-            except Exception:
-                polished_content = cleaned_content
-
-            self.state.push_draft(polished_content)
-
-        # Then apply the instruction
-        draft = self.state.current_draft
-        if not draft:
-            return ConversationResult(
-                action="noop",
-                text="",
-                intent=Intent.CONVERSATION,
-                message="No content to transform",
-            )
-
-        transformed = await self._transform_text(draft, action, params)
-        self.state.push_draft(transformed)
-
-        return ConversationResult(
-            action="inject_text",
-            text=transformed,
-            intent=Intent.CONVERSATION,
-            message=f"Content processed and transformed: {action}",
-        )
-
     # ------------------------------------------------------------------
-    # LLM interaction
+    # LLM chat call (system + user message)
     # ------------------------------------------------------------------
 
-    async def _polish_text(self, text: str) -> str:
-        """Light polishing — fix grammar, remove fillers."""
-        prompt = (
-            "Clean up this dictated text. Fix grammar, remove filler words "
-            "(um, uh, like, you know), handle self-corrections, and produce "
-            "clean readable text. Preserve the speaker's meaning exactly. "
-            "Return ONLY the cleaned text.\n\n"
-            f"Text: {text}"
-        )
-        return await self._call_llm(prompt)
-
-    async def _transform_text(
-        self, text: str, action: str, params: dict
-    ) -> str:
-        """Transform text based on the detected action."""
-
-        # Build action-specific prompts
-        prompts = {
-            "make_formal": (
-                "Rewrite the following text as a formal, professional piece of writing. "
-                "Maintain all the original information and meaning. Add appropriate "
-                "greetings/closings if it's a letter or email.\n\n"
-                f"Text:\n{text}"
-            ),
-            "make_casual": (
-                "Rewrite the following text in a casual, friendly tone. "
-                "Keep all the information but make it sound natural and conversational.\n\n"
-                f"Text:\n{text}"
-            ),
-            "make_prompt": (
-                "Transform the following text into a well-structured prompt/instruction "
-                "for an AI assistant (like Claude Code). Make it clear, specific, and "
-                "actionable. Use proper formatting (headers, bullets, code blocks) where "
-                "appropriate. Preserve all technical details and requirements.\n\n"
-                f"Text:\n{text}"
-            ),
-            "make_bullets": (
-                "Convert the following text into a well-organized bulleted list. "
-                "Each bullet should be a clear, concise point.\n\n"
-                f"Text:\n{text}"
-            ),
-            "make_numbered": (
-                "Convert the following text into a numbered list. "
-                "Each item should be a clear, concise point.\n\n"
-                f"Text:\n{text}"
-            ),
-            "make_email": (
-                "Rewrite the following text as a professional email. Include an "
-                "appropriate subject line suggestion, greeting, body, and closing.\n\n"
-                f"Text:\n{text}"
-            ),
-            "make_code_comment": (
-                "Convert the following text into well-formatted code comments or "
-                "documentation. Use proper comment syntax and be concise but thorough.\n\n"
-                f"Text:\n{text}"
-            ),
-            "make_social": (
-                "Rewrite the following as a concise, engaging social media post. "
-                "Keep it under 280 characters if possible. Make it punchy.\n\n"
-                f"Text:\n{text}"
-            ),
-            "make_shorter": (
-                "Make the following text shorter and more concise while preserving "
-                "all key information.\n\n"
-                f"Text:\n{text}"
-            ),
-            "make_longer": (
-                "Expand the following text with more detail and elaboration while "
-                "maintaining the same tone and intent.\n\n"
-                f"Text:\n{text}"
-            ),
-            "fix_grammar": (
-                "Fix all grammar, spelling, and punctuation errors in the following "
-                "text. Do not change the meaning or tone.\n\n"
-                f"Text:\n{text}"
-            ),
-            "summarize": (
-                "Summarize the following text concisely, capturing the key points.\n\n"
-                f"Text:\n{text}"
-            ),
-        }
-
-        # Handle translate with language parameter
-        if action == "translate":
-            target_lang = "English"
-            if params.get("captures"):
-                target_lang = params["captures"][0]
-            prompt = (
-                f"Translate the following text into {target_lang}. "
-                "Maintain the tone and meaning.\n\n"
-                f"Text:\n{text}"
-            )
-        else:
-            prompt = prompts.get(action)
-
-        if not prompt:
-            # Fallback: use the raw instruction text as the prompt
-            prompt = (
-                f"Apply the following instruction to the text below.\n\n"
-                f"Instruction: {action}\n\n"
-                f"Text:\n{text}"
-            )
-
-        # Add conversation context if we have prior turns
-        if len(self.state.turns) > 1:
-            context = self.state.conversation_summary
-            prompt = (
-                f"Conversation context (for reference):\n{context}\n\n"
-                f"---\n\n{prompt}"
-            )
-
-        prompt += "\n\nReturn ONLY the resulting text, no commentary or explanation."
-
-        return await self._call_llm(prompt)
-
-    async def _call_llm(self, prompt: str) -> str:
-        """Route to the configured LLM provider."""
-        if self.provider == "ollama":
-            return await self._call_ollama(prompt)
-        elif self.provider == "openai":
-            return await self._call_openai(prompt)
-        elif self.provider == "anthropic":
-            return await self._call_anthropic(prompt)
-        elif self.provider == "groq":
-            return await self._call_groq(prompt)
+    async def _call_llm_chat(self, system: str, user_msg: str) -> str:
+        """Call LLM with system + user message pair."""
+        if self.provider == "groq":
+            return await self._chat_groq(system, user_msg)
         elif self.provider == "gemini":
-            return await self._call_gemini(prompt)
+            return await self._chat_gemini(system, user_msg)
+        elif self.provider == "openai":
+            return await self._chat_openai(system, user_msg)
+        elif self.provider == "anthropic":
+            return await self._chat_anthropic(system, user_msg)
+        elif self.provider == "ollama":
+            return await self._chat_ollama(system, user_msg)
         else:
-            # No LLM available — return text as-is
-            logger.warning("No LLM provider configured — returning raw text")
-            return prompt.split("Text:\n")[-1].split("\n\nReturn ONLY")[0]
+            logger.warning("Unknown LLM provider '{}' — returning raw text", self.provider)
+            return user_msg
 
-    async def _call_ollama(self, prompt: str) -> str:
-        """Call local Ollama instance."""
-        import httpx
-
-        url = f"{self.ollama_url.rstrip('/')}/api/generate"
-        payload = {
-            "model": self.model,
-            "prompt": prompt,
-            "stream": False,
-            "options": {"temperature": 0.3, "num_predict": 4096},
-        }
-
-        try:
-            async with httpx.AsyncClient(timeout=60.0) as client:
-                resp = await client.post(url, json=payload)
-                resp.raise_for_status()
-                return resp.json()["response"].strip()
-        except httpx.ConnectError:
-            logger.error(
-                "Cannot connect to Ollama at {}. "
-                "Install from https://ollama.com and run: ollama pull {}",
-                self.ollama_url, self.model,
-            )
-            raise RuntimeError(
-                f"Ollama not running at {self.ollama_url}. "
-                f"Start it with: ollama serve"
-            )
-        except Exception:
-            logger.exception("Ollama call failed")
-            raise
-
-    async def _call_openai(self, prompt: str) -> str:
-        """Call OpenAI API."""
-        from core.text_polisher import _get_openai_client
-
-        client = _get_openai_client(self.api_key or "")
-        response = await client.chat.completions.create(
-            model=self.model,
-            messages=[{"role": "user", "content": prompt}],
-            temperature=0.3,
-            max_tokens=4096,
-        )
-        return response.choices[0].message.content.strip()
-
-    async def _call_anthropic(self, prompt: str) -> str:
-        """Call Anthropic API."""
-        from core.text_polisher import _get_anthropic_client
-
-        client = _get_anthropic_client(self.api_key or "")
-        response = await client.messages.create(
-            model=self.model,
-            max_tokens=4096,
-            messages=[{"role": "user", "content": prompt}],
-            temperature=0.3,
-        )
-        return response.content[0].text.strip()
-
-    async def _call_groq(self, prompt: str) -> str:
-        """Call Groq API (OpenAI-compatible, free tier available).
-
-        Groq provides blazing-fast inference with free tier:
-        - llama-3.3-70b-versatile: 30 req/min, 6000 tokens/min free
-        - Sign up at: https://console.groq.com
-
-        Uses the OpenAI SDK with a custom base_url.
-        """
+    async def _chat_groq(self, system: str, user_msg: str) -> str:
+        """Groq API — free tier: 30 req/min."""
         try:
             import openai
         except ImportError:
             raise RuntimeError("openai package needed for Groq. Run: pip install openai")
 
+        if not self.api_key:
+            logger.error("Groq API key is empty/missing — LLM will fail")
+            raise RuntimeError("Groq API key not configured. Set it in Settings → AI Polishing.")
+
+        logger.debug("Calling Groq API (model={}, key={}...)", self.model, self.api_key[:8] if self.api_key else "NONE")
+
         client = openai.AsyncOpenAI(
-            api_key=self.api_key or "",
+            api_key=self.api_key,
             base_url="https://api.groq.com/openai/v1",
         )
-        response = await client.chat.completions.create(
-            model=self.model,
-            messages=[{"role": "user", "content": prompt}],
-            temperature=0.3,
-            max_tokens=4096,
-        )
-        return response.choices[0].message.content.strip()
+        try:
+            response = await client.chat.completions.create(
+                model=self.model,
+                messages=[
+                    {"role": "system", "content": system},
+                    {"role": "user", "content": user_msg},
+                ],
+                temperature=0.2,
+                max_tokens=4096,
+                response_format={"type": "json_object"},
+            )
+            result = response.choices[0].message.content.strip()
+            logger.debug("Groq response: {}", result[:200])
+            return result
+        except Exception as exc:
+            logger.error("Groq API call failed: {} — {}", type(exc).__name__, exc)
+            raise
 
-    async def _call_gemini(self, prompt: str) -> str:
-        """Call Google Gemini API (free tier: 15 req/min).
-
-        Sign up at: https://aistudio.google.com/apikey
-        Free tier includes gemini-2.0-flash with generous limits.
-        """
+    async def _chat_gemini(self, system: str, user_msg: str) -> str:
+        """Google Gemini API — free tier: 15 req/min."""
         import httpx
 
         url = f"https://generativelanguage.googleapis.com/v1beta/models/{self.model}:generateContent"
-        headers = {"Content-Type": "application/json"}
-        params = {"key": self.api_key or ""}
         payload = {
-            "contents": [{"parts": [{"text": prompt}]}],
+            "system_instruction": {"parts": [{"text": system}]},
+            "contents": [{"parts": [{"text": user_msg}]}],
             "generationConfig": {
-                "temperature": 0.3,
+                "temperature": 0.2,
                 "maxOutputTokens": 4096,
+                "responseMimeType": "application/json",
             },
         }
 
         async with httpx.AsyncClient(timeout=60.0) as client:
-            resp = await client.post(url, json=payload, headers=headers, params=params)
+            resp = await client.post(
+                url, json=payload,
+                headers={"Content-Type": "application/json"},
+                params={"key": self.api_key or ""},
+            )
             resp.raise_for_status()
             data = resp.json()
-            # Extract text from Gemini response
             candidates = data.get("candidates", [])
             if candidates:
                 parts = candidates[0].get("content", {}).get("parts", [])
                 if parts:
                     return parts[0].get("text", "").strip()
             return ""
+
+    async def _chat_openai(self, system: str, user_msg: str) -> str:
+        """OpenAI API."""
+        try:
+            import openai
+        except ImportError:
+            raise RuntimeError("openai package needed. Run: pip install openai")
+
+        client = openai.AsyncOpenAI(api_key=self.api_key or "")
+        response = await client.chat.completions.create(
+            model=self.model,
+            messages=[
+                {"role": "system", "content": system},
+                {"role": "user", "content": user_msg},
+            ],
+            temperature=0.2,
+            max_tokens=4096,
+            response_format={"type": "json_object"},
+        )
+        return response.choices[0].message.content.strip()
+
+    async def _chat_anthropic(self, system: str, user_msg: str) -> str:
+        """Anthropic Claude API."""
+        try:
+            import anthropic
+        except ImportError:
+            raise RuntimeError("anthropic package needed. Run: pip install anthropic")
+
+        client = anthropic.AsyncAnthropic(api_key=self.api_key or "")
+        response = await client.messages.create(
+            model=self.model,
+            max_tokens=4096,
+            system=system,
+            messages=[{"role": "user", "content": user_msg}],
+            temperature=0.2,
+        )
+        return response.content[0].text.strip()
+
+    async def _chat_ollama(self, system: str, user_msg: str) -> str:
+        """Local Ollama instance."""
+        import httpx
+
+        url = f"{self.ollama_url.rstrip('/')}/api/chat"
+        payload = {
+            "model": self.model,
+            "messages": [
+                {"role": "system", "content": system},
+                {"role": "user", "content": user_msg},
+            ],
+            "stream": False,
+            "format": "json",
+            "options": {"temperature": 0.2, "num_predict": 4096},
+        }
+
+        try:
+            async with httpx.AsyncClient(timeout=60.0) as client:
+                resp = await client.post(url, json=payload)
+                resp.raise_for_status()
+                return resp.json()["message"]["content"].strip()
+        except Exception:
+            logger.exception("Ollama call failed")
+            raise
 
     # ------------------------------------------------------------------
     # Utility
@@ -681,25 +574,9 @@ class ConversationEngine:
 
 @dataclass
 class ConversationResult:
-    """Result from processing a speech utterance.
-
-    Attributes
-    ----------
-    action : str
-        What to do:
-        - "inject_text": paste text into active field
-        - "replace_all": select all + paste (replaces current content)
-        - "read_back": show text to user (TTS in future)
-        - "clear": clear the current draft
-        - "noop": do nothing
-    text : str
-        The text content for the action.
-    intent : Intent
-        The detected intent.
-    message : str
-        Human-readable status message for the UI.
-    """
+    """Result from processing a speech utterance."""
     action: str = "noop"
     text: str = ""
     intent: Intent = Intent.DICTATE
     message: str = ""
+    voice_response: str = ""  # Text to speak via TTS (Trevo Mode)

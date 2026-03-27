@@ -6,7 +6,9 @@ __pycache__/
 *.py[cod]
 *.egg-info/
 dist/
+dist2/
 build/
+build2/
 *.egg
 .eggs/
 venv/

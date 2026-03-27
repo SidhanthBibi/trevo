@@ -91,17 +91,17 @@ log = logging.getLogger(__name__)
 # Theme colours
 # ---------------------------------------------------------------------------
 
-_BG = QColor("#1a1a2e")
-_NODE_BG = QColor("#16213e")
-_NODE_BG_SELECTED = QColor("#1c2a4a")
-_NODE_BORDER = QColor("#0f3460")
-_NODE_BORDER_SELECTED = QColor("#e94560")
-_TITLE_BG = QColor("#0f3460")
-_TEXT = QColor("#eaeaea")
-_TEXT_DIM = QColor("#a0a0b0")
-_ACCENT = QColor("#e94560")
-_GRID_LINE = QColor("#222244")
-_GRID_LINE_MAJOR = QColor("#2a2a50")
+_BG = QColor("#0F0E17")
+_NODE_BG = QColor("#1A1725")
+_NODE_BG_SELECTED = QColor("#2D2640")
+_NODE_BORDER = QColor("#2D2640")
+_NODE_BORDER_SELECTED = QColor("#7C3AED")
+_TITLE_BG = QColor("#2D2640")
+_TEXT = QColor("#F5F3FF")
+_TEXT_DIM = QColor("#B8A8D0")
+_ACCENT = QColor("#7C3AED")
+_GRID_LINE = QColor("#1A1725")
+_GRID_LINE_MAJOR = QColor("#2D2640")
 
 PORT_COLORS: dict[str, QColor] = {
     "text": QColor("#4ade80"),
@@ -162,17 +162,26 @@ class PortItem(QGraphicsEllipseItem):
         self.setAcceptHoverEvents(True)
         self.setCursor(Qt.CursorShape.CrossCursor)
         self.setZValue(3)
+        # Prevent the parent NodeItem from stealing clicks on the port
+        self.setFlag(QGraphicsItem.GraphicsItemFlag.ItemIsSelectable, False)
 
         # Tooltip
         direction = "Input" if port.direction == "input" else "Output"
         self.setToolTip(f"{direction}: {port.name} ({port.port_type})")
+
+    def shape(self) -> QPainterPath:
+        """Return an enlarged hit area (2× radius) for easier clicking."""
+        path = QPainterPath()
+        hit_r = _PORT_RADIUS * 2.5
+        path.addEllipse(-hit_r, -hit_r, hit_r * 2, hit_r * 2)
+        return path
 
     # --- label next to port ------------------------------------------------
 
     def add_label(self) -> None:
         """Create a small text label next to the port circle."""
         label = QGraphicsSimpleTextItem(self.port.name, self.parent_node)
-        label.setFont(QFont("Segoe UI", 8))
+        label.setFont(QFont("Inter", 8))
         label.setBrush(QBrush(_TEXT_DIM))
         pos = self.pos()
         if self.port.direction == "input":
@@ -231,7 +240,7 @@ class NodeItem(QGraphicsRectItem):
 
         # Title text
         title = QGraphicsSimpleTextItem(self.node.label, self)
-        title.setFont(QFont("Segoe UI", 9, QFont.Weight.Bold))
+        title.setFont(QFont("Inter", 9, QFont.Weight.Bold))
         title.setBrush(QBrush(_TEXT))
         tw = title.boundingRect().width()
         title.setPos((_NODE_WIDTH - tw) / 2, 5)
@@ -286,8 +295,8 @@ class NodeItem(QGraphicsRectItem):
     def contextMenuEvent(self, event: Any) -> None:  # noqa: N802
         menu = QMenu()
         menu.setStyleSheet(
-            "QMenu { background: #16213e; color: #eaeaea; border: 1px solid #0f3460; }"
-            "QMenu::item:selected { background: #0f3460; }"
+            "QMenu { background: #1A1725; color: #F5F3FF; border: 1px solid #2D2640; }"
+            "QMenu::item:selected { background: rgba(124,58,237,0.2); }"
         )
         act_cfg = menu.addAction("Configure...")
         act_dup = menu.addAction("Duplicate")
@@ -347,8 +356,8 @@ class ConnectionWire(QGraphicsPathItem):
     def contextMenuEvent(self, event: Any) -> None:  # noqa: N802
         menu = QMenu()
         menu.setStyleSheet(
-            "QMenu { background: #16213e; color: #eaeaea; border: 1px solid #0f3460; }"
-            "QMenu::item:selected { background: #0f3460; }"
+            "QMenu { background: #1A1725; color: #F5F3FF; border: 1px solid #2D2640; }"
+            "QMenu::item:selected { background: rgba(124,58,237,0.2); }"
         )
         act_del = menu.addAction("Delete Connection")
         chosen = menu.exec(event.screenPos())
@@ -555,7 +564,13 @@ class WorkflowScene(QGraphicsScene):
     # ---- port dragging (connection creation) ------------------------------
 
     def mousePressEvent(self, event: Any) -> None:  # noqa: N802
-        item = self.itemAt(event.scenePos(), QTransform())
+        # Use items() instead of itemAt() so child PortItems are found
+        # even when overlapping their parent NodeItem.
+        item = None
+        for candidate in self.items(event.scenePos()):
+            if isinstance(candidate, PortItem):
+                item = candidate
+                break
         if isinstance(item, PortItem) and event.button() == Qt.MouseButton.LeftButton:
             self._drag_source_port = item
             colour = PORT_COLORS.get(item.port.port_type, PORT_COLORS["any"])
@@ -578,7 +593,12 @@ class WorkflowScene(QGraphicsScene):
 
     def mouseReleaseEvent(self, event: Any) -> None:  # noqa: N802
         if self._temp_wire and self._drag_source_port:
-            item = self.itemAt(event.scenePos(), QTransform())
+            # Use items() to reliably find PortItem under cursor
+            item = None
+            for candidate in self.items(event.scenePos()):
+                if isinstance(candidate, PortItem):
+                    item = candidate
+                    break
             if isinstance(item, PortItem) and item is not self._drag_source_port:
                 src = self._drag_source_port
                 dst = item
@@ -628,7 +648,7 @@ class WorkflowCanvas(QGraphicsView):
         super().__init__(scene, parent)
         self.setRenderHint(QPainter.RenderHint.Antialiasing)
         self.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform)
-        self.setDragMode(QGraphicsView.DragMode.RubberBandDrag)
+        self.setDragMode(QGraphicsView.DragMode.NoDrag)
         self.setTransformationAnchor(QGraphicsView.ViewportAnchor.AnchorUnderMouse)
         self.setViewportUpdateMode(QGraphicsView.ViewportUpdateMode.SmartViewportUpdate)
         self.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
@@ -683,11 +703,13 @@ class WorkflowCanvas(QGraphicsView):
             self.scale(factor, factor)
 
     def mousePressEvent(self, event: Any) -> None:  # noqa: N802
-        if event.button() == Qt.MouseButton.MiddleButton:
+        # Middle-click or right-click on empty space → pan
+        if event.button() in (Qt.MouseButton.MiddleButton, Qt.MouseButton.RightButton):
             self._panning = True
             self._pan_start = event.position()
             self.setCursor(Qt.CursorShape.ClosedHandCursor)
             return
+        # Left-click → let items handle it (node drag, port drag, selection)
         super().mousePressEvent(event)
 
     def mouseMoveEvent(self, event: Any) -> None:  # noqa: N802
@@ -704,10 +726,11 @@ class WorkflowCanvas(QGraphicsView):
         super().mouseMoveEvent(event)
 
     def mouseReleaseEvent(self, event: Any) -> None:  # noqa: N802
-        if event.button() == Qt.MouseButton.MiddleButton:
-            self._panning = False
-            self.setCursor(Qt.CursorShape.ArrowCursor)
-            return
+        if event.button() in (Qt.MouseButton.MiddleButton, Qt.MouseButton.RightButton):
+            if self._panning:
+                self._panning = False
+                self.setCursor(Qt.CursorShape.ArrowCursor)
+                return
         super().mouseReleaseEvent(event)
 
     def keyPressEvent(self, event: Any) -> None:  # noqa: N802
@@ -754,16 +777,16 @@ class NodePalette(QWidget):
         layout.setSpacing(2)
 
         title = QLabel("Node Palette")
-        title.setFont(QFont("Segoe UI", 11, QFont.Weight.Bold))
+        title.setFont(QFont("Inter", 11, QFont.Weight.Bold))
         title.setStyleSheet("color: #eaeaea; padding: 6px;")
         layout.addWidget(title)
 
         self._tree = QTreeWidget()
         self._tree.setHeaderHidden(True)
         self._tree.setStyleSheet(
-            "QTreeWidget { background: #16213e; color: #eaeaea; border: none; }"
+            "QTreeWidget { background: #1A1725; color: #F5F3FF; border: none; }"
             "QTreeWidget::item { padding: 4px 8px; }"
-            "QTreeWidget::item:hover { background: #0f3460; }"
+            "QTreeWidget::item:hover { background: #2D2640; }"
             "QTreeWidget::item:selected { background: rgba(233,69,96,0.25); }"
         )
         self._tree.setDragEnabled(True)
@@ -819,7 +842,7 @@ class PropertiesPanel(QWidget):
         self._current_node_id: str | None = None
 
         self._title = QLabel("Properties")
-        self._title.setFont(QFont("Segoe UI", 11, QFont.Weight.Bold))
+        self._title.setFont(QFont("Inter", 11, QFont.Weight.Bold))
         self._title.setStyleSheet("color: #eaeaea; padding: 6px 0;")
         self._layout.addWidget(self._title)
 
@@ -859,7 +882,7 @@ class PropertiesPanel(QWidget):
         # Label editor
         label_edit = QLineEdit(node.label)
         label_edit.setStyleSheet(
-            "background: #1a1a2e; color: #eaeaea; border: 1px solid #0f3460; "
+            "background: #0F0E17; color: #F5F3FF; border: 1px solid #2D2640; "
             "border-radius: 4px; padding: 4px;"
         )
         label_edit.textChanged.connect(lambda t, n=node: self._update_label(n, t))
@@ -882,7 +905,7 @@ class PropertiesPanel(QWidget):
     ) -> QWidget | None:
         """Create an appropriate editor widget for a config value."""
         style = (
-            "background: #1a1a2e; color: #eaeaea; border: 1px solid #0f3460; "
+            "background: #0F0E17; color: #F5F3FF; border: 1px solid #2D2640; "
             "border-radius: 4px; padding: 4px;"
         )
 
@@ -920,7 +943,7 @@ class PropertiesPanel(QWidget):
 
         # Known enum-like fields.
         known_choices: dict[str, list[str]] = {
-            "engine": ["gemini", "google", "deepgram", "whisper", "openai"],
+            "engine": ["gemini", "google_cloud", "groq", "whisper", "openai"],
             "provider": ["groq", "gemini", "ollama", "openai", "anthropic", "claude_cli"],
             "style": ["formal", "casual", "bullet", "email", "clean", "technical"],
             "method": ["clipboard", "keyboard"],
@@ -948,7 +971,7 @@ class PropertiesPanel(QWidget):
             editor.setPlainText(str(value))
             editor.setMaximumHeight(120)
             editor.setStyleSheet(
-                "background: #1a1a2e; color: #eaeaea; border: 1px solid #0f3460; "
+                "background: #0F0E17; color: #F5F3FF; border: 1px solid #2D2640; "
                 "border-radius: 4px; font-family: Consolas; font-size: 11px;"
             )
             editor.textChanged.connect(
@@ -1032,7 +1055,7 @@ class WorkflowEditorDialog(QDialog):
         # Status bar
         self._status = QStatusBar()
         self._status.setStyleSheet(
-            "QStatusBar { background: #0f3460; color: #a0a0b0; font-size: 11px; padding: 2px 8px; }"
+            "QStatusBar { background: #2D2640; color: #B8A8D0; font-size: 11px; padding: 2px 8px; }"
         )
         self._status.showMessage("Ready")
         main_layout.addWidget(self._status)
@@ -1040,7 +1063,7 @@ class WorkflowEditorDialog(QDialog):
     def _build_toolbar(self) -> QWidget:
         bar = QWidget()
         bar.setFixedHeight(42)
-        bar.setStyleSheet("background: #0f3460;")
+        bar.setStyleSheet("background: #2D2640;")
         layout = QHBoxLayout(bar)
         layout.setContentsMargins(8, 4, 8, 4)
         layout.setSpacing(6)
@@ -1052,9 +1075,9 @@ class WorkflowEditorDialog(QDialog):
         add_btn.setStyleSheet(self._toolbar_btn_style())
         add_menu = QMenu(add_btn)
         add_menu.setStyleSheet(
-            "QMenu { background: #16213e; color: #eaeaea; border: 1px solid #0f3460; }"
+            "QMenu { background: #1A1725; color: #F5F3FF; border: 1px solid #2D2640; }"
             "QMenu::item { padding: 6px 24px; }"
-            "QMenu::item:selected { background: #0f3460; }"
+            "QMenu::item:selected { background: rgba(124,58,237,0.2); }"
         )
         _build_categories()
         ntypes = all_node_types()
@@ -1203,14 +1226,14 @@ class WorkflowEditorDialog(QDialog):
             "QPushButton, QToolButton { background: rgba(26,26,46,0.6); color: #eaeaea; "
             "border: 1px solid rgba(233,69,96,0.3); border-radius: 4px; "
             "padding: 4px 12px; font-size: 12px; }"
-            "QPushButton:hover, QToolButton:hover { background: #e94560; border-color: #e94560; }"
+            "QPushButton:hover, QToolButton:hover { background: #7C3AED; border-color: #7C3AED; }"
         )
 
     @staticmethod
     def _stylesheet() -> str:
         return (
-            "QDialog#WorkflowEditor { background: #1a1a2e; }"
-            "QSplitter::handle { background: #0f3460; width: 2px; }"
+            "QDialog#WorkflowEditor { background: #0F0E17; }"
+            "QSplitter::handle { background: #2D2640; width: 2px; }"
             "QLabel { color: #eaeaea; }"
         )
 

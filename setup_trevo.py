@@ -387,11 +387,11 @@ except Exception as e:
     print(f"      [FAIL] sounddevice: {{e}}")
 
 try:
-    import keyboard
-    print("      [OK] keyboard")
+    import pynput
+    print("      [OK] pynput")
 except Exception as e:
-    errors.append(f"keyboard: {{e}}")
-    print(f"      [FAIL] keyboard: {{e}}")
+    errors.append(f"pynput: {{e}}")
+    print(f"      [FAIL] pynput: {{e}}")
 
 try:
     import numpy

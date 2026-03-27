@@ -37,10 +37,32 @@ def build_exe() -> Path:
     cmd = [
         sys.executable, "-m", "PyInstaller",
         "--name", "trevo",
-        "--onefile",
+        "--onedir",
         "--windowed",
         "--noconfirm",
         "--clean",
+
+        # Exclude heavy ML packages — speaker recognition deferred to future release
+        "--exclude-module", "torch",
+        "--exclude-module", "torchvision",
+        "--exclude-module", "torchaudio",
+        "--exclude-module", "resemblyzer",
+        "--exclude-module", "librosa",
+        "--exclude-module", "numba",
+        "--exclude-module", "llvmlite",
+        "--exclude-module", "sklearn",
+        "--exclude-module", "scikit-learn",
+        "--exclude-module", "scipy",
+        "--exclude-module", "webrtcvad",
+        "--exclude-module", "soundfile",
+        "--exclude-module", "tensorflow",
+        "--exclude-module", "tensorboard",
+        "--exclude-module", "tkinter",
+        "--exclude-module", "_tkinter",
+        "--exclude-module", "matplotlib",
+        "--exclude-module", "IPython",
+        "--exclude-module", "notebook",
+        "--exclude-module", "pytest",
 
         # Hidden imports for all our packages
         "--hidden-import", "core",
@@ -48,7 +70,8 @@ def build_exe() -> Path:
         "--hidden-import", "core.audio_capture",
         "--hidden-import", "core.vad",
         "--hidden-import", "core.stt_engine",
-        "--hidden-import", "core.stt_deepgram",
+        "--hidden-import", "core.stt_gemini",
+        "--hidden-import", "core.stt_google",
         "--hidden-import", "core.stt_whisper",
         "--hidden-import", "core.stt_openai",
         "--hidden-import", "core.stt_groq",
@@ -92,7 +115,11 @@ def build_exe() -> Path:
         "--hidden-import", "ui.trevo_mode",
         "--hidden-import", "core.tts_engine",
         "--hidden-import", "core.clap_detector",
-        "--hidden-import", "core.speaker_recognition",
+        "--hidden-import", "core.wake_word",
+        # core.speaker_recognition excluded — depends on torch (deferred)
+        "--hidden-import", "pynput",
+        "--hidden-import", "pynput.keyboard",
+        "--hidden-import", "pynput.keyboard._win32",
         "--hidden-import", "mcp_server",
         "--hidden-import", "mcp_server.server",
 
@@ -112,13 +139,14 @@ def build_exe() -> Path:
         print("\n  [FAILED] PyInstaller failed. Check errors above.")
         sys.exit(1)
 
-    exe_path = ROOT / "dist" / "trevo.exe"
+    dist_dir = ROOT / "dist" / "trevo"
+    exe_path = dist_dir / "trevo.exe"
 
     # Copy config template next to exe
     config_example = ROOT / "config.toml.example"
     if config_example.exists():
-        shutil.copy2(config_example, ROOT / "dist" / "config.toml")
-        print(f"  Copied config.toml to dist/")
+        shutil.copy2(config_example, dist_dir / "config.toml")
+        print(f"  Copied config.toml to dist/trevo/")
 
     print(f"\n  [OK] Built: {exe_path}")
     print(f"  Size: {exe_path.stat().st_size / 1024 / 1024:.1f} MB")
@@ -131,7 +159,7 @@ def build_installer() -> Path:
     print("  Building Windows Installer")
     print("=" * 60)
 
-    exe_path = ROOT / "dist" / "trevo.exe"
+    exe_path = ROOT / "dist" / "trevo" / "trevo.exe"
     if not exe_path.exists():
         print("  [!] trevo.exe not found. Building it first...")
         build_exe()

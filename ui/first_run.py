@@ -37,12 +37,12 @@ from ui.styles import DARK_THEME
 # ---------------------------------------------------------------------------
 # Shared styling constants (match the project dark theme)
 # ---------------------------------------------------------------------------
-_ACCENT = "#e94560"
-_BG_PRIMARY = "#1a1a2e"
-_BG_SECONDARY = "#16213e"
-_BG_TERTIARY = "#0f3460"
-_TEXT_PRIMARY = "#eaeaea"
-_TEXT_SECONDARY = "#a0a0b0"
+_ACCENT = "#7C3AED"
+_BG_PRIMARY = "#0F0E17"
+_BG_SECONDARY = "#1A1725"
+_BG_TERTIARY = "#2D2640"
+_TEXT_PRIMARY = "#F5F3FF"
+_TEXT_SECONDARY = "#B8A8D0"
 
 _WIZARD_QSS = DARK_THEME + """
 /* ───────── Wizard-specific overrides ───────── */
@@ -160,7 +160,6 @@ class FirstRunWizard(QWizard):
                 "groq_api_key": self.field("groq_key") or "",
                 "gemini_api_key": self.field("gemini_key") or "",
                 "google_cloud_api_key": self.field("google_cloud_key") or "",
-                "deepgram_api_key": self.field("deepgram_key") or "",
                 "openai_api_key": self.field("openai_key") or "",
             },
             "polishing": {
@@ -199,8 +198,8 @@ class FirstRunWizard(QWizard):
         elif config["stt"]["gemini_api_key"]:
             config["stt"]["engine"] = "gemini"
             config["polishing"]["provider"] = "gemini"
-        elif config["stt"]["deepgram_api_key"]:
-            config["stt"]["engine"] = "deepgram"
+        elif config["stt"]["google_cloud_api_key"]:
+            config["stt"]["engine"] = "google_cloud"
 
         return config
 
@@ -350,12 +349,6 @@ class APIKeysPage(QWizardPage):
         self._anthropic_key = self._api_key_row(
             opt_form, "Anthropic:", "anthropic_key",
             "console.anthropic.com/settings/keys",
-            badge="optional",
-        )
-
-        self._deepgram_key = self._api_key_row(
-            opt_form, "Deepgram:", "deepgram_key",
-            "console.deepgram.com",
             badge="optional",
         )
 
@@ -627,7 +620,6 @@ class SummaryPage(QWizardPage):
         google_cloud = self.field("google_cloud_key") or ""
         openai = self.field("openai_key") or ""
         anthropic = self.field("anthropic_key") or ""
-        deepgram = self.field("deepgram_key") or ""
         vault = self.field("vault_path") or str(Path.home() / "trevo-vault")
 
         # Determine engine
@@ -635,14 +627,14 @@ class SummaryPage(QWizardPage):
             engine = "Groq Whisper (free)"
         elif gemini:
             engine = "Gemini (free)"
-        elif deepgram:
-            engine = "Deepgram Nova-3"
+        elif google_cloud:
+            engine = "Google Cloud STT"
         elif openai:
             engine = "OpenAI Whisper"
         else:
             engine = "None configured yet"
 
-        keys_configured = sum(bool(k) for k in [groq, gemini, google_cloud, openai, anthropic, deepgram])
+        keys_configured = sum(bool(k) for k in [groq, gemini, google_cloud, openai, anthropic])
 
         lines = [
             f"<b>Speech Engine:</b> {engine}",

@@ -36,11 +36,11 @@ class TrayState(Enum):
 # Icon colours
 # ---------------------------------------------------------------------------
 _STATE_COLORS: dict[TrayState, str] = {
-    TrayState.IDLE: "#3B82F6",
-    TrayState.RECORDING: "#FF3B5C",
-    TrayState.PROCESSING: "#F59E0B",
-    TrayState.OFFLINE: "#6B7280",
-    TrayState.ERROR: "#EF4444",
+    TrayState.IDLE: "#7C3AED",       # vibrant purple
+    TrayState.RECORDING: "#EF4444",   # red
+    TrayState.PROCESSING: "#06B6D4",  # cyan
+    TrayState.OFFLINE: "#6B7280",     # gray
+    TrayState.ERROR: "#EF4444",       # red
 }
 
 APP_TITLE: str = "trevo v1.0.0"
@@ -51,29 +51,29 @@ _ICON_SIZE: int = 64
 # ---------------------------------------------------------------------------
 _MENU_STYLE = """
 QMenu {
-    background-color: rgba(24, 24, 32, 230);
-    border: 1px solid rgba(255, 255, 255, 0.08);
-    border-radius: 8px;
+    background-color: rgba(15, 14, 23, 240);
+    border: 1px solid rgba(124, 58, 237, 0.2);
+    border-radius: 10px;
     padding: 6px 0px;
-    color: #E2E8F0;
-    font-family: "Segoe UI", "Inter", sans-serif;
-    font-size: 13px;
+    color: #F5F3FF;
+    font-family: "Inter", "Segoe UI Variable", "SF Pro Display", sans-serif;
+    font-size: 14px;
 }
 QMenu::item {
-    padding: 6px 24px 6px 16px;
-    border-radius: 4px;
+    padding: 8px 24px 8px 16px;
+    border-radius: 6px;
     margin: 1px 6px;
 }
 QMenu::item:selected {
-    background-color: rgba(59, 130, 246, 0.35);
+    background-color: rgba(124, 58, 237, 0.25);
     color: #FFFFFF;
 }
 QMenu::item:disabled {
-    color: rgba(148, 163, 184, 0.6);
+    color: rgba(184, 168, 208, 0.6);
 }
 QMenu::separator {
     height: 1px;
-    background-color: rgba(255, 255, 255, 0.07);
+    background-color: rgba(124, 58, 237, 0.12);
     margin: 4px 12px;
 }
 """
@@ -320,7 +320,7 @@ class TrayIcon(QSystemTrayIcon):
         # Title
         title_action = QAction(APP_TITLE, self)
         title_action.setEnabled(False)
-        title_font = QFont("Segoe UI", 10)
+        title_font = QFont("Inter", 10)
         title_font.setBold(True)
         title_action.setFont(title_font)
         menu.addAction(title_action)
@@ -328,11 +328,11 @@ class TrayIcon(QSystemTrayIcon):
         menu.addSeparator()
 
         # Dictation toggle
-        self._dictation_action = QAction("Start Dictation\tCtrl+Shift+Space", self)
+        self._dictation_action = QAction("Start Dictation\tRCtrl ×2", self)
         self._dictation_action.triggered.connect(self.dictation_requested.emit)
         menu.addAction(self._dictation_action)
 
-        act_trevo_mode = QAction("Trevo Mode\tCtrl+Shift+T", self)
+        act_trevo_mode = QAction("Trevo Mode\tRCtrl ×4", self)
         act_trevo_mode.triggered.connect(self.trevo_mode_requested.emit)
         menu.addAction(act_trevo_mode)
 
@@ -358,7 +358,7 @@ class TrayIcon(QSystemTrayIcon):
         menu.addSeparator()
 
         # Status indicators (disabled / informational)
-        self._engine_action = QAction("Engine: Deepgram Nova-3", self)
+        self._engine_action = QAction("Engine: —", self)
         self._engine_action.setEnabled(False)
         menu.addAction(self._engine_action)
 
@@ -405,8 +405,8 @@ class TrayIcon(QSystemTrayIcon):
     def set_dictating(self, active: bool) -> None:
         """Convenience method: switch between RECORDING and IDLE states."""
         self._dictation_action.setText(
-            "Stop Dictation\tCtrl+Shift+Space" if active
-            else "Start Dictation\tCtrl+Shift+Space"
+            "Stop Dictation\tRCtrl ×2" if active
+            else "Start Dictation\tRCtrl ×2"
         )
         self.set_state(TrayState.RECORDING if active else TrayState.IDLE)
 

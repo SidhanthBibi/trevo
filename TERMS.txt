@@ -19,7 +19,6 @@ limited to:
   - Google Cloud (text-to-speech, speech recognition)
   - OpenAI (speech recognition, language models)
   - Anthropic Claude (language models)
-  - Deepgram (speech recognition)
   - Ollama (local language models)
 
 Your use of these services is subject to their respective terms of service and

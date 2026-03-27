@@ -263,10 +263,33 @@ class AudioInputExecutor(BaseNodeExecutor):
     async def execute(
         self, inputs: dict[str, Any], config: dict[str, Any]
     ) -> dict[str, Any]:
-        # In a real implementation this would capture audio via the
-        # project's AudioCapture module.  For now return a placeholder.
-        log.info("AudioInput: capturing audio (device=%s)", config.get("device", "default"))
-        return {"audio": b"<audio_placeholder>"}
+        device = config.get("device", "default")
+        sample_rate = int(config.get("sample_rate", 16000))
+        duration = float(config.get("duration", 5.0))
+        log.info("AudioInput: capturing %ss audio (device=%s, sr=%d)", duration, device, sample_rate)
+
+        try:
+            import numpy as np
+            import sounddevice as sd
+
+            dev = None if device == "default" else int(device)
+            # Record mono audio at the configured sample rate
+            audio_np = sd.rec(
+                int(duration * sample_rate),
+                samplerate=sample_rate,
+                channels=1,
+                dtype="int16",
+                device=dev,
+            )
+            # Run in executor to avoid blocking the async loop
+            loop = asyncio.get_running_loop()
+            await loop.run_in_executor(None, sd.wait)
+            audio_bytes = audio_np.tobytes()
+            log.info("AudioInput: captured %d bytes", len(audio_bytes))
+            return {"audio": audio_bytes}
+        except Exception as exc:
+            log.error("AudioInput: capture failed (%s), returning empty audio", exc)
+            return {"audio": b""}
 
 
 @register_node
@@ -299,10 +322,14 @@ class STTExecutor(BaseNodeExecutor):
         log.info("STT: transcribing %d bytes with engine=%s", len(audio) if isinstance(audio, bytes) else 0, engine_name)
 
         try:
+            # Resolve API key: prefer config, then fall back to TrevoApp settings
+            api_key = config.get("api_key", "")
+            if not api_key:
+                api_key = self._resolve_stt_api_key(engine_name)
+
             # Map engine names to their module and class
             _engine_map = {
                 "groq": ("core.stt_groq", "GroqSTT"),
-                "deepgram": ("core.stt_deepgram", "DeepgramSTTEngine"),
                 "whisper_local": ("core.stt_whisper", "WhisperLocalSTT"),
                 "openai": ("core.stt_openai", "OpenAISTT"),
                 "gemini": ("core.stt_gemini", "GeminiSTT"),
@@ -310,8 +337,8 @@ class STTExecutor(BaseNodeExecutor):
             }
 
             if engine_name not in _engine_map:
-                log.warning("STT: unknown engine %s, falling back to placeholder", engine_name)
-                return {"text": "<transcribed_text>"}
+                log.warning("STT: unknown engine %s", engine_name)
+                return {"text": ""}
 
             module_path, class_name = _engine_map[engine_name]
             import importlib
@@ -320,8 +347,8 @@ class STTExecutor(BaseNodeExecutor):
 
             # Build kwargs from config (api_key, model, language)
             kwargs: dict[str, Any] = {}
-            if config.get("api_key"):
-                kwargs["api_key"] = config["api_key"]
+            if api_key:
+                kwargs["api_key"] = api_key
             if config.get("model"):
                 kwargs["model"] = config["model"]
             if config.get("language"):
@@ -340,11 +367,31 @@ class STTExecutor(BaseNodeExecutor):
             await engine.stop_stream()
 
             text = " ".join(transcribed_parts) if transcribed_parts else ""
+            log.info("STT: transcribed %d chars", len(text))
             return {"text": text}
 
         except Exception as exc:
-            log.warning("STT: engine %s failed (%s), returning placeholder", engine_name, exc)
-            return {"text": "<transcribed_text>"}
+            log.error("STT: engine %s failed: %s", engine_name, exc)
+            return {"text": ""}
+
+    @staticmethod
+    def _resolve_stt_api_key(engine_name: str) -> str:
+        """Pull the API key for the given STT engine from TrevoApp settings."""
+        try:
+            from core.app import TrevoApp
+            app = TrevoApp.instance()
+            if app is None:
+                return ""
+            s = app.settings.stt
+            key_map = {
+                "groq": s.groq_api_key or app.settings.polishing.groq_api_key,
+                "openai": s.openai_api_key,
+                "gemini": app.settings.polishing.gemini_api_key or getattr(s, "gemini_api_key", ""),
+                "google_cloud": s.google_cloud_api_key,
+            }
+            return key_map.get(engine_name, "") or ""
+        except Exception:
+            return ""
 
 
 @register_node
@@ -381,6 +428,8 @@ class LLMExecutor(BaseNodeExecutor):
         temperature = config.get("temperature", 0.7)
         max_tokens = config.get("max_tokens", 2048)
         api_key = config.get("api_key", "")
+        if not api_key:
+            api_key = self._resolve_llm_api_key(provider)
         log.info("LLM: provider=%s model=%s prompt_len=%d", provider, model, len(str(prompt)))
 
         try:
@@ -474,8 +523,28 @@ class LLMExecutor(BaseNodeExecutor):
                 return {"text": f"<llm_response to: {prompt[:60]}>"}
 
         except Exception as exc:
-            log.warning("LLM: provider %s failed (%s), returning placeholder", provider, exc)
-            return {"text": f"<llm_response to: {prompt[:60]}>"}
+            log.error("LLM: provider %s failed: %s", provider, exc)
+            return {"text": ""}
+
+    @staticmethod
+    def _resolve_llm_api_key(provider: str) -> str:
+        """Pull the API key for the given LLM provider from TrevoApp settings."""
+        try:
+            from core.app import TrevoApp
+            app = TrevoApp.instance()
+            if app is None:
+                return ""
+            p = app.settings.polishing
+            s = app.settings.stt
+            key_map = {
+                "groq": p.groq_api_key,
+                "openai": p.openai_api_key or s.openai_api_key,
+                "anthropic": p.anthropic_api_key,
+                "gemini": p.gemini_api_key,
+            }
+            return key_map.get(provider, "") or ""
+        except Exception:
+            return ""
 
 
 @register_node
@@ -506,6 +575,14 @@ class TextPolishExecutor(BaseNodeExecutor):
         log.info("TextPolish: style=%s len=%d", style, len(str(text)))
 
         try:
+            # Try to use TrevoApp's existing polisher first
+            from core.app import TrevoApp
+            app = TrevoApp.instance()
+            if app is not None and app._text_polisher is not None:
+                polished = await app._text_polisher.polish(text)
+                return {"text": polished}
+
+            # Fall back to creating a new polisher
             from core.text_polisher import TextPolisher
 
             provider = config.get("provider", "openai")
@@ -552,6 +629,8 @@ class TranslateExecutor(BaseNodeExecutor):
         provider = config.get("provider", "gemini")
         api_key = config.get("api_key", "")
         model = config.get("model", "")
+        if not api_key:
+            api_key = LLMExecutor._resolve_llm_api_key(provider)
         log.info("Translate: target=%s provider=%s len=%d", lang, provider, len(str(text)))
 
         translation_prompt = (
@@ -866,7 +945,37 @@ class SaveToVaultExecutor(BaseNodeExecutor):
     ) -> dict[str, Any]:
         text = inputs.get("text", "")
         title = config.get("title", "Untitled")
+        tags_raw = config.get("tags", "")
         log.info("SaveToVault: title=%s len=%d", title, len(str(text)))
+
+        if not text:
+            return {}
+
+        try:
+            from core.app import TrevoApp
+            app = TrevoApp.instance()
+            if app is not None and app._knowledge is not None:
+                note = app._knowledge.create_from_dictation(
+                    raw_text=text,
+                    polished_text=text,
+                    app_context=title,
+                    auto_link=True,
+                )
+                log.info("SaveToVault: created note '%s'", note.title)
+            else:
+                # Fall back to creating a standalone KnowledgeGraph
+                from knowledge.graph import KnowledgeGraph
+                kg = KnowledgeGraph()
+                note = kg.create_from_dictation(
+                    raw_text=text,
+                    polished_text=text,
+                    app_context=title,
+                    auto_link=True,
+                )
+                log.info("SaveToVault: created note '%s' (standalone)", note.title)
+        except Exception as exc:
+            log.error("SaveToVault: failed to save: %s", exc)
+
         return {}
 
 
@@ -895,8 +1004,43 @@ class WebSearchExecutor(BaseNodeExecutor):
         self, inputs: dict[str, Any], config: dict[str, Any]
     ) -> dict[str, Any]:
         query = inputs.get("query", "")
-        log.info("WebSearch: query=%s", query[:80])
-        return {"results": f"<search_results for: {query[:60]}>"}
+        num_results = int(config.get("num_results", 5))
+        log.info("WebSearch: query=%s num_results=%d", query[:80], num_results)
+
+        if not query:
+            return {"results": ""}
+
+        try:
+            import httpx
+
+            # Use DuckDuckGo Instant Answer API (no API key required)
+            url = "https://api.duckduckgo.com/"
+            params = {"q": query, "format": "json", "no_html": "1", "no_redirect": "1"}
+            async with httpx.AsyncClient(timeout=15.0) as client:
+                resp = await client.get(url, params=params)
+                resp.raise_for_status()
+                data = resp.json()
+
+            # Collect results from the API response
+            results_parts: list[str] = []
+
+            # Abstract (main answer)
+            abstract = data.get("AbstractText", "")
+            if abstract:
+                source = data.get("AbstractSource", "")
+                results_parts.append(f"**{source}**: {abstract}")
+
+            # Related topics
+            for topic in data.get("RelatedTopics", [])[:num_results]:
+                if isinstance(topic, dict) and "Text" in topic:
+                    results_parts.append(topic["Text"])
+
+            results_text = "\n\n".join(results_parts) if results_parts else f"No results found for: {query}"
+            return {"results": results_text}
+
+        except Exception as exc:
+            log.error("WebSearch: search failed: %s", exc)
+            return {"results": f"Search failed: {exc}"}
 
 
 @register_node

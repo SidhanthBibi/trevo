@@ -46,7 +46,6 @@ providers:
   | Google Cloud   | Audio chunks or text         | STT / TTS          |
   | OpenAI         | Audio chunks or text         | STT / LLM          |
   | Anthropic      | Text                         | LLM                |
-  | Deepgram       | Audio stream                 | STT                |
   | Ollama (local) | Text (stays on your machine) | LLM                |
 
 Each provider has its own privacy policy. We encourage you to review them.

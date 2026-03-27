@@ -86,6 +86,15 @@ class GoogleCloudTTS(TTSEngine):
 
     def _init_client(self) -> None:
         try:
+            # Only use Google Cloud TTS if GOOGLE_APPLICATION_CREDENTIALS is set
+            # (service account auth). The TextToSpeechClient() constructor hangs
+            # if no credentials are configured.
+            import os
+            if not os.environ.get("GOOGLE_APPLICATION_CREDENTIALS"):
+                logger.debug("GoogleCloudTTS skipped: GOOGLE_APPLICATION_CREDENTIALS not set")
+                self._available = False
+                return
+
             from google.cloud import texttospeech  # type: ignore[import-untyped]
             self._texttospeech = texttospeech
             self._client = texttospeech.TextToSpeechClient()
@@ -385,6 +394,81 @@ class TTSManager:
         path.write_bytes(audio)
         return path
 
+    def speak_sync(self, text: str) -> None:
+        """Synchronous speak + play — for use from background threads.
+
+        Tries each engine in the fallback chain, then plays via sounddevice.
+        """
+        if not text or not text.strip():
+            return
+
+        import asyncio
+
+        # Create a temporary event loop for sync execution
+        loop = asyncio.new_event_loop()
+        try:
+            loop.run_until_complete(self.play(text))
+        except Exception:
+            logger.exception("TTSManager.speak_sync failed")
+        finally:
+            loop.close()
+
+    @staticmethod
+    def _play_via_tempfile(audio_bytes: bytes) -> None:
+        """Last-resort playback: write bytes to a temp file and play natively.
+
+        Works on Windows without ffmpeg/pydub by using winsound (WAV) or
+        PowerShell MediaPlayer (MP3).
+        """
+        import os
+        import sys
+        import time as _time
+
+        # Determine file extension from magic bytes
+        is_mp3 = audio_bytes[:3] == b"ID3" or audio_bytes[:2] == b"\xff\xfb"
+        ext = ".mp3" if is_mp3 else ".wav"
+
+        tmp = tempfile.NamedTemporaryFile(suffix=ext, delete=False)
+        try:
+            tmp.write(audio_bytes)
+            tmp.close()
+
+            if sys.platform == "win32":
+                if not is_mp3:
+                    # WAV: use winsound (blocking, no subprocess overhead)
+                    import winsound
+                    winsound.PlaySound(tmp.name, winsound.SND_FILENAME)
+                else:
+                    # MP3: use PowerShell MediaPlayer with proper duration wait
+                    import subprocess
+                    # Estimate duration from file size (~16kbps for gTTS)
+                    duration_s = max(2, len(audio_bytes) // 2000)
+                    subprocess.run(
+                        ["powershell", "-WindowStyle", "Hidden", "-Command",
+                         f'Add-Type -AssemblyName presentationCore;'
+                         f'$p=New-Object System.Windows.Media.MediaPlayer;'
+                         f'$p.Open([Uri]::new("{tmp.name}"));'
+                         f'Start-Sleep -Milliseconds 500;'
+                         f'$p.Play();'
+                         f'Start-Sleep -Seconds {duration_s};'
+                         f'$p.Close()'],
+                        timeout=duration_s + 10,
+                        creationflags=0x08000000,  # CREATE_NO_WINDOW
+                    )
+            else:
+                os.startfile(tmp.name)  # type: ignore[attr-defined]
+
+            logger.debug("TTSManager: played audio via temp file (%s)", ext)
+        except Exception as exc:  # noqa: BLE001
+            logger.error("TTSManager: temp-file playback failed: %s", exc)
+        finally:
+            # Small delay to ensure file is released before deletion
+            _time.sleep(0.5)
+            try:
+                os.unlink(tmp.name)
+            except OSError:
+                pass
+
     async def play(self, text: str) -> None:
         """Speak *text* and play through speakers using sounddevice.
 
@@ -451,5 +535,7 @@ class TTSManager:
                     sd.wait()
 
                 await loop.run_in_executor(None, _play_blocking)
-            except Exception as exc:  # noqa: BLE001
-                logger.error("TTSManager.play: cannot decode audio for playback: %s", exc)
+            except Exception:  # noqa: BLE001
+                # pydub also failed — last resort: write to temp file and play natively
+                logger.debug("pydub MP3 decode failed; using temp-file playback")
+                self._play_via_tempfile(audio_bytes)

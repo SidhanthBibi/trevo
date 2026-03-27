@@ -249,11 +249,11 @@ class SettingsDialog(QDialog):
 
         self._stt_model_combo = QComboBox()
         self._stt_model_combo.addItems([
-            "nova-3",
-            "nova-2",
-            "nova-2-general",
             "whisper-large-v3",
+            "whisper-large-v3-turbo",
             "whisper-1",
+            "chirp",
+            "gemini-2.0-flash",
         ])
         mg.addRow("Model:", self._stt_model_combo)
 
@@ -534,7 +534,7 @@ class SettingsDialog(QDialog):
         self._google_cloud_stt_key.setText(s.get("google_cloud_stt_api_key", ""))
         self._openai_stt_key.setText(s.get("openai_api_key", ""))
         model_idx = self._stt_model_combo.findText(
-            s.get("stt_model", "nova-3"), Qt.MatchFlag.MatchFixedString
+            s.get("stt_model", "whisper-large-v3"), Qt.MatchFlag.MatchFixedString
         )
         if model_idx >= 0:
             self._stt_model_combo.setCurrentIndex(model_idx)

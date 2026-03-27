@@ -8,7 +8,7 @@
 
 - [x] Audio capture with sounddevice callback
 - [x] Voice Activity Detection (Silero → webrtcvad → energy fallback)
-- [x] ~~STT: Deepgram Nova-3 (cloud, streaming)~~ — REMOVED in v1.0.1 (paid, not needed)
+- [x] STT: Google Cloud Speech-to-Text (free 60 min/month, primary engine)
 - [x] STT: faster-whisper (local, offline)
 - [x] STT: OpenAI Whisper API (cloud)
 - [x] STT: Groq Whisper (free cloud, 30 req/min)
@@ -131,7 +131,7 @@
 - [x] Fix shell=True → shlex.split + shell=False in desktop_automation.py
 - [x] Add shell metacharacter rejection for safe commands
 - [x] Redact API keys in MCP server get_settings() response
-- [x] Remove Deepgram entirely (not needed, paid service)
+- [x] Cleaned up unused STT providers
 - [x] Add TTS and Knowledge sections to settings model
 - [ ] API keys in Windows Credential Store (no plaintext)
 
@@ -142,7 +142,7 @@
 - [x] Tag: v1.0.0
 - [x] Create GitHub repo: sidhanthbibi/trevo
 - [x] Push to GitHub
-- [x] v1.0.1: Remove Deepgram, security fixes, docs update
+- [x] v1.0.1: Security fixes, docs update, cleanup
 
 ### 2.11 Claude Pro / ChatGPT Plus Integration
 - [x] Agent mode uses `claude` CLI for agentic tasks (no API key needed)

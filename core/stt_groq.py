@@ -119,6 +119,35 @@ class GroqSTT(STTEngine):
         except Exception:
             logger.exception("Groq STT failed")
 
+    async def recognize_interim(self, audio_bytes: bytes) -> str:
+        """Quick recognition for real-time interim results."""
+        if not audio_bytes or not self._api_key:
+            return ""
+
+        # Use last ~10 seconds for speed
+        max_bytes = 10 * 16_000 * 2
+        if len(audio_bytes) > max_bytes:
+            audio_bytes = audio_bytes[-max_bytes:]
+
+        try:
+            import openai
+
+            wav_bytes = pcm_to_wav(audio_bytes)
+            wav_file = io.BytesIO(wav_bytes)
+            wav_file.name = "audio.wav"
+
+            client = openai.AsyncOpenAI(
+                api_key=self._api_key,
+                base_url="https://api.groq.com/openai/v1",
+            )
+            response = await client.audio.transcriptions.create(
+                model=self._model, file=wav_file
+            )
+            return (response.text or "").strip()
+        except Exception as exc:
+            logger.debug("Groq interim recognition failed: {}", exc)
+            return ""
+
     async def stop_stream(self) -> None:
         self._streaming = False
         self._audio_buffer.clear()

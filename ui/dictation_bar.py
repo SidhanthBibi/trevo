@@ -41,7 +41,6 @@ from PyQt6.QtGui import (
 )
 from PyQt6.QtWidgets import (
     QGraphicsDropShadowEffect,
-    QGraphicsOpacityEffect,
     QHBoxLayout,
     QLabel,
     QSizePolicy,
@@ -49,19 +48,8 @@ from PyQt6.QtWidgets import (
     QWidget,
 )
 
-# ---------------------------------------------------------------------------
-# Try to use qframelesswindow for native acrylic blur on Windows
-# ---------------------------------------------------------------------------
-_USE_ACRYLIC = False
+# Always use plain QWidget — qframelesswindow adds unwanted title bar chrome
 _AcrylicBase: type = QWidget
-
-try:
-    from qframelesswindow import AcrylicWindow  # type: ignore[import-untyped]
-
-    _AcrylicBase = AcrylicWindow  # type: ignore[assignment,misc]
-    _USE_ACRYLIC = True
-except ImportError:
-    pass
 
 
 # ---------------------------------------------------------------------------
@@ -69,29 +57,29 @@ except ImportError:
 # ---------------------------------------------------------------------------
 BAR_WIDTH = 460
 BAR_RADIUS = 20
-BAR_TOP_MARGIN = 32
+BAR_BOTTOM_MARGIN = 48  # px from bottom of screen
 
-COLOR_BG = QColor(15, 15, 25, 209)  # rgba(15,15,25,0.82)
-COLOR_BORDER = QColor(255, 255, 255, 20)  # rgba(255,255,255,0.08)
-COLOR_TEXT_PRIMARY = QColor(255, 255, 255, 217)  # rgba(255,255,255,0.85)
-COLOR_TEXT_SECONDARY = QColor(255, 255, 255, 140)  # rgba(255,255,255,0.55)
-COLOR_TEXT_MUTED = QColor(255, 255, 255, 102)  # rgba(255,255,255,0.4)
-COLOR_GLASS_PILL = QColor(255, 255, 255, 20)  # rgba(255,255,255,0.08)
-COLOR_GLASS_PILL_BORDER = QColor(255, 255, 255, 31)  # rgba(255,255,255,0.12)
-COLOR_LEVEL_BG = QColor(255, 255, 255, 15)  # rgba(255,255,255,0.06)
-COLOR_LEVEL_BLUE = QColor(59, 130, 246)  # #3B82F6
-COLOR_LEVEL_RED = QColor(255, 59, 92)  # #FF3B5C
-COLOR_IDLE_ORB = QColor(30, 30, 50, 200)
-COLOR_RECORDING = QColor(255, 59, 92)  # #FF3B5C
-COLOR_CLOSE_HOVER = QColor(255, 255, 255, 38)  # rgba(255,255,255,0.15)
+COLOR_BG = QColor(15, 14, 23, 178)  # deep purple-black @ 70% — more transparent
+COLOR_BORDER = QColor(124, 58, 237, 45)  # subtle purple accent border
+COLOR_TEXT_PRIMARY = QColor(245, 243, 255, 230)  # white-lavender
+COLOR_TEXT_SECONDARY = QColor(184, 168, 208, 178)  # lavender mist
+COLOR_TEXT_MUTED = QColor(139, 127, 168, 128)  # muted purple
+COLOR_GLASS_PILL = QColor(45, 38, 64, 140)  # elevated purple
+COLOR_GLASS_PILL_BORDER = QColor(124, 58, 237, 40)  # purple border
+COLOR_LEVEL_BG = QColor(45, 38, 64, 80)  # dark purple track
+COLOR_LEVEL_PURPLE = QColor(124, 58, 237)  # #7C3AED
+COLOR_LEVEL_CYAN = QColor(6, 182, 212)  # #06B6D4
+COLOR_IDLE_ORB = QColor(26, 23, 37, 200)  # surface color
+COLOR_RECORDING = QColor(239, 68, 68)  # #EF4444
+COLOR_CLOSE_HOVER = QColor(124, 58, 237, 60)  # purple highlight
 
 ANIM_FPS = 60
 ANIM_INTERVAL = 1000 // ANIM_FPS  # ~16ms
 
 
 def _mono_font(size: int = 12) -> QFont:
-    """Return a monospace font, preferring Cascadia Code."""
-    for family in ("Cascadia Code", "Consolas", "Courier New"):
+    """Return a monospace font, preferring JetBrains Mono."""
+    for family in ("JetBrains Mono", "Cascadia Code", "Fira Code", "Consolas"):
         fid = QFontDatabase.font(family, "", size)
         if fid.family().lower().startswith(family.lower().split()[0].lower()):
             f = QFont(family, size)
@@ -106,7 +94,7 @@ def _ui_font(size: int = 12, bold: bool = False) -> QFont:
     """Return a clean UI font, trying several families."""
     from PyQt6.QtGui import QFontDatabase
     available = set(QFontDatabase.families())
-    for family in ("Segoe UI", "SF Pro Display", "Inter", "Helvetica Neue"):
+    for family in ("Inter", "Segoe UI Variable", "SF Pro Display", "Segoe UI"):
         if family in available:
             f = QFont(family, size)
             if bold:
@@ -208,9 +196,9 @@ class _MicOrb(QWidget):
 
         # Core glow
         glow = QRadialGradient(QPointF(cx, cy), 16)
-        glow.setColorAt(0.0, QColor(255, 59, 92, 200))
-        glow.setColorAt(0.6, QColor(255, 59, 92, 120))
-        glow.setColorAt(1.0, QColor(255, 59, 92, 0))
+        glow.setColorAt(0.0, QColor(239, 68, 68, 200))
+        glow.setColorAt(0.6, QColor(239, 68, 68, 120))
+        glow.setColorAt(1.0, QColor(239, 68, 68, 0))
         p.setPen(Qt.PenStyle.NoPen)
         p.setBrush(QBrush(glow))
         p.drawEllipse(QPointF(cx, cy), 16, 16)
@@ -229,10 +217,10 @@ class _MicOrb(QWidget):
         # Spinning arc
         arc_rect = QRectF(cx - 13, cy - 13, 26, 26)
         grad = QConicalGradient(QPointF(cx, cy), -self._spin_angle)
-        grad.setColorAt(0.0, QColor(59, 130, 246, 220))
-        grad.setColorAt(0.35, QColor(139, 92, 246, 180))
-        grad.setColorAt(0.7, QColor(255, 59, 92, 60))
-        grad.setColorAt(1.0, QColor(59, 130, 246, 0))
+        grad.setColorAt(0.0, QColor(124, 58, 237, 220))   # purple
+        grad.setColorAt(0.35, QColor(6, 182, 212, 180))   # cyan
+        grad.setColorAt(0.7, QColor(16, 185, 129, 60))    # emerald
+        grad.setColorAt(1.0, QColor(124, 58, 237, 0))
 
         pen = QPen(QBrush(grad), 2.5)
         pen.setCapStyle(Qt.PenCapStyle.RoundCap)
@@ -316,15 +304,117 @@ class _AudioLevelBar(QWidget):
         fill_w = max(h, w * self._display_level)  # minimum pill width
         if self._display_level > 0.005:
             grad = QLinearGradient(0, 0, fill_w, 0)
-            grad.setColorAt(0.0, COLOR_LEVEL_BLUE)
+            grad.setColorAt(0.0, COLOR_LEVEL_PURPLE)
             # Blend toward red as level increases
             if self._display_level > 0.6:
                 red_t = (self._display_level - 0.6) / 0.4
-                grad.setColorAt(1.0, _lerp_color(COLOR_LEVEL_BLUE, COLOR_LEVEL_RED, red_t))
+                grad.setColorAt(1.0, _lerp_color(COLOR_LEVEL_PURPLE, COLOR_LEVEL_CYAN, red_t))
             else:
-                grad.setColorAt(1.0, COLOR_LEVEL_BLUE)
+                grad.setColorAt(1.0, COLOR_LEVEL_PURPLE)
             p.setBrush(QBrush(grad))
             p.drawRoundedRect(QRectF(0, 0, fill_w, h), radius, radius)
+
+        p.end()
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# AudioWaveform — animated vertical bars responding to audio levels
+# ═══════════════════════════════════════════════════════════════════════════
+class _AudioWaveform(QWidget):
+    """8-bar animated audio waveform visualizer.
+
+    Bars respond to actual audio levels with smooth interpolation.
+    Each bar has a slightly different random offset for organic feel.
+    Color gradient from purple (#7C3AED) to cyan (#06B6D4) based on height.
+    """
+
+    BAR_COUNT = 8
+    BAR_WIDTH = 3
+    BAR_GAP = 2
+    MIN_HEIGHT = 4
+    MAX_HEIGHT = 28
+
+    def __init__(self, parent: QWidget | None = None) -> None:
+        super().__init__(parent)
+        total_w = self.BAR_COUNT * self.BAR_WIDTH + (self.BAR_COUNT - 1) * self.BAR_GAP
+        self.setFixedSize(total_w, self.MAX_HEIGHT)
+
+        self._level: float = 0.0
+        self._display_level: float = 0.0
+        self._state: str = "idle"
+
+        # Per-bar phase offsets for organic motion
+        import random
+        random.seed(42)  # deterministic for consistent look
+        self._bar_offsets = [random.uniform(0.0, 6.28) for _ in range(self.BAR_COUNT)]
+        self._bar_heights = [float(self.MIN_HEIGHT)] * self.BAR_COUNT
+
+        self._elapsed: float = 0.0
+        self._timer = QTimer(self)
+        self._timer.setInterval(ANIM_INTERVAL)
+        self._timer.timeout.connect(self._tick)
+        self._timer.start()
+
+    def set_state(self, state: str) -> None:
+        self._state = state
+
+    def set_level(self, level: float) -> None:
+        """Set audio level 0.0..1.0."""
+        self._level = max(0.0, min(1.0, level))
+
+    def _tick(self) -> None:
+        dt = ANIM_INTERVAL / 1000.0
+        self._elapsed += dt
+
+        # Smooth level interpolation
+        self._display_level += (self._level - self._display_level) * 0.25
+
+        for i in range(self.BAR_COUNT):
+            if self._state == "recording":
+                # Active: bars respond to audio with per-bar variation
+                base = self._display_level
+                wave = math.sin(self._elapsed * 4.0 + self._bar_offsets[i]) * 0.3
+                target = self.MIN_HEIGHT + (self.MAX_HEIGHT - self.MIN_HEIGHT) * max(0, base + wave * base)
+            elif self._state == "processing":
+                # Processing: ripple wave pattern
+                wave = (math.sin(self._elapsed * 6.0 + i * 0.8) + 1.0) / 2.0
+                target = self.MIN_HEIGHT + (self.MAX_HEIGHT - self.MIN_HEIGHT) * 0.5 * wave
+            else:
+                # Idle: subtle breathing pulse
+                wave = (math.sin(self._elapsed * 1.0 + self._bar_offsets[i]) + 1.0) / 2.0
+                target = self.MIN_HEIGHT + 2.0 * wave
+
+            # Smooth bar height transition
+            self._bar_heights[i] += (target - self._bar_heights[i]) * 0.3
+
+        self.update()
+
+    def paintEvent(self, _event: object) -> None:  # noqa: N802
+        p = QPainter(self)
+        p.setRenderHint(QPainter.RenderHint.Antialiasing)
+        p.setPen(Qt.PenStyle.NoPen)
+
+        total_h = self.height()
+
+        for i in range(self.BAR_COUNT):
+            h = max(self.MIN_HEIGHT, min(self.MAX_HEIGHT, self._bar_heights[i]))
+            x = i * (self.BAR_WIDTH + self.BAR_GAP)
+            y = (total_h - h) / 2.0  # vertically centered
+            r = self.BAR_WIDTH / 2.0
+
+            # Color gradient based on bar height (purple → cyan)
+            t = (h - self.MIN_HEIGHT) / (self.MAX_HEIGHT - self.MIN_HEIGHT)
+            color = _lerp_color(COLOR_LEVEL_PURPLE, COLOR_LEVEL_CYAN, t)
+            # Boost alpha when active
+            if self._state == "recording":
+                color.setAlpha(200 + int(55 * t))
+            elif self._state == "processing":
+                color.setAlpha(160 + int(60 * t))
+            else:
+                color.setAlpha(100 + int(40 * t))
+
+            p.setBrush(color)
+            p.drawRoundedRect(QRectF(x, y, self.BAR_WIDTH, h), r, r)
 
         p.end()
 
@@ -535,6 +625,9 @@ class DictationBar(_AcrylicBase):  # type: ignore[misc]
         self._mic_orb = _MicOrb()
         top_row.addWidget(self._mic_orb)
 
+        self._waveform = _AudioWaveform()
+        top_row.addWidget(self._waveform)
+
         self._audio_level = _AudioLevelBar()
         top_row.addWidget(self._audio_level, stretch=1)
 
@@ -546,7 +639,7 @@ class DictationBar(_AcrylicBase):  # type: ignore[misc]
 
         self._timer_label = QLabel("00:00")
         self._timer_label.setFont(_mono_font(12))
-        self._timer_label.setStyleSheet(f"color: rgba(255,255,255,0.4); background: transparent;")
+        self._timer_label.setStyleSheet("color: rgba(184,168,208,0.6); background: transparent;")
         self._timer_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self._timer_label.setFixedWidth(46)
         top_row.addWidget(self._timer_label)
@@ -561,7 +654,7 @@ class DictationBar(_AcrylicBase):  # type: ignore[misc]
         self._transcript_label = QLabel("")
         self._transcript_label.setFont(_ui_font(13))
         self._transcript_label.setStyleSheet(
-            "color: rgba(255,255,255,0.85); background: transparent; padding: 0 2px;"
+            "color: rgba(245,243,255,0.88); background: transparent; padding: 0 2px;"
         )
         self._transcript_label.setWordWrap(True)
         self._transcript_label.setMaximumHeight(42)  # ~2 lines
@@ -578,10 +671,6 @@ class DictationBar(_AcrylicBase):  # type: ignore[misc]
     # Custom painting — glass background
     # ------------------------------------------------------------------
     def paintEvent(self, _event: object) -> None:  # noqa: N802
-        if _USE_ACRYLIC:
-            # AcrylicWindow handles the blur; we still paint our rounded rect
-            super().paintEvent(_event)  # type: ignore[arg-type]
-
         p = QPainter(self)
         p.setRenderHint(QPainter.RenderHint.Antialiasing)
 
@@ -593,11 +682,10 @@ class DictationBar(_AcrylicBase):  # type: ignore[misc]
         path = QPainterPath()
         path.addRoundedRect(rect, BAR_RADIUS, BAR_RADIUS)
 
-        if not _USE_ACRYLIC:
-            # Semi-transparent dark fill
-            p.setPen(Qt.PenStyle.NoPen)
-            p.setBrush(COLOR_BG)
-            p.drawPath(path)
+        # Semi-transparent dark fill
+        p.setPen(Qt.PenStyle.NoPen)
+        p.setBrush(COLOR_BG)
+        p.drawPath(path)
 
         # Subtle top highlight (glass refraction simulation)
         highlight = QLinearGradient(rect.topLeft(), QPointF(rect.left(), rect.top() + 30))
@@ -618,12 +706,9 @@ class DictationBar(_AcrylicBase):  # type: ignore[misc]
     # Animations (show/hide)
     # ------------------------------------------------------------------
     def _setup_animations(self) -> None:
-        self._opacity_effect = QGraphicsOpacityEffect(self)
-        self._opacity_effect.setOpacity(1.0)
-        self.setGraphicsEffect(self._opacity_effect)
-
-        # Fade animation
-        self._fade_anim = QPropertyAnimation(self._opacity_effect, b"opacity")
+        # Use windowOpacity instead of QGraphicsOpacityEffect
+        # (QGraphicsOpacityEffect conflicts with WA_TranslucentBackground and causes flickering)
+        self._fade_anim = QPropertyAnimation(self, b"windowOpacity")
         self._fade_anim.setDuration(200)
         self._fade_anim.setEasingCurve(QEasingCurve.Type.OutCubic)
 
@@ -648,13 +733,13 @@ class DictationBar(_AcrylicBase):  # type: ignore[misc]
     # Positioning
     # ------------------------------------------------------------------
     def _position_default(self) -> None:
-        """Place bar at top-center of primary screen, 32px from top."""
+        """Place bar at bottom-center of primary screen."""
         screen = QGuiApplication.primaryScreen()
         if screen is None:
             return
         geom = screen.availableGeometry()
         x = geom.x() + (geom.width() - self.width()) // 2
-        y = geom.y() + BAR_TOP_MARGIN
+        y = geom.y() + geom.height() - self.sizeHint().height() - BAR_BOTTOM_MARGIN
         self.move(x, y)
         self._default_pos = QPoint(x, y)
 
@@ -666,16 +751,18 @@ class DictationBar(_AcrylicBase):  # type: ignore[misc]
     # Public API
     # ------------------------------------------------------------------
     def show_bar(self) -> None:
-        """Show the bar with fade-in + slide-down animation."""
+        """Show the bar with fade-in + slide-up animation."""
         self._hide_after_fade = False
         self._show_group.stop()
 
+        self._position_default()  # recalculate position each time
         target_pos = self.pos()
-        start_pos = QPoint(target_pos.x(), target_pos.y() - 10)
+        start_pos = QPoint(target_pos.x(), target_pos.y() + 10)  # slide up from below
 
-        self._opacity_effect.setOpacity(0.0)
+        self.setWindowOpacity(0.0)
         self.move(start_pos)
         self.show()
+        self.raise_()
 
         self._fade_anim.setStartValue(0.0)
         self._fade_anim.setEndValue(1.0)
@@ -690,14 +777,14 @@ class DictationBar(_AcrylicBase):  # type: ignore[misc]
         self._show_group.start()
 
     def hide_bar(self) -> None:
-        """Hide the bar with fade-out + slide-up animation."""
+        """Hide the bar with fade-out + slide-down animation."""
         self._hide_after_fade = True
         self._show_group.stop()
 
         current_pos = self.pos()
-        end_pos = QPoint(current_pos.x(), current_pos.y() - 10)
+        end_pos = QPoint(current_pos.x(), current_pos.y() + 10)  # slide down
 
-        self._fade_anim.setStartValue(self._opacity_effect.opacity())
+        self._fade_anim.setStartValue(self.windowOpacity())
         self._fade_anim.setEndValue(0.0)
         self._fade_anim.setDuration(150)
         self._fade_anim.setEasingCurve(QEasingCurve.Type.InCubic)
@@ -714,9 +801,9 @@ class DictationBar(_AcrylicBase):  # type: ignore[misc]
         if not text:
             self._transcript_label.hide()
         else:
-            # Truncate to ~2 lines worth (roughly 120 chars for 460px width)
+            # Show the tail (most recent words) for real-time streaming feel
             if len(text) > 120:
-                display = text[:117] + "..."
+                display = "..." + text[-117:]
             else:
                 display = text
             self._transcript_label.setText(display)
@@ -724,8 +811,9 @@ class DictationBar(_AcrylicBase):  # type: ignore[misc]
         self.adjustSize()
 
     def update_audio_level(self, level: float) -> None:
-        """Update the audio level bar. *level* should be 0.0 .. 1.0."""
+        """Update the audio level bar and waveform. *level* should be 0.0 .. 1.0."""
         self._audio_level.set_level(level)
+        self._waveform.set_level(level)
 
     def update_timer(self, seconds: int) -> None:
         """Display elapsed recording time."""
@@ -743,6 +831,7 @@ class DictationBar(_AcrylicBase):  # type: ignore[misc]
         """
         self._state = state
         self._mic_orb.set_state(state)
+        self._waveform.set_state(state)
 
         if state == "recording":
             self._status_label.set_status("Listening", animate=True)

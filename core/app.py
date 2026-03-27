@@ -13,9 +13,10 @@ from typing import Optional
 
 from PyQt6.QtCore import QObject, pyqtSignal, pyqtSlot
 
+from core.agent_mode import AgentOrchestrator
 from core.command_parser import CommandParser, CommandResult, CommandType
 from core.conversation_engine import ConversationEngine, ConversationResult, Intent
-from core.hotkey_manager import DictationMode, HotkeyManager
+from core.hotkey_manager import HotkeyManager
 from core.language_manager import LanguageManager
 from core.text_injector import TextInjector
 from models.settings import Settings
@@ -52,7 +53,10 @@ class TrevoApp(QObject):
     state_changed = pyqtSignal(AppState)       # emits AppState enum directly
     transcript_ready = pyqtSignal(str)         # polished (or raw) text
     raw_transcript_ready = pyqtSignal(str)     # unpolished STT output
+    interim_transcript_ready = pyqtSignal(str) # real-time partial transcript
     conversation_message = pyqtSignal(str)     # status from conversation engine
+    voice_response_ready = pyqtSignal(str)     # TTS text for Trevo Mode
+    desktop_command_ready = pyqtSignal(str)    # desktop automation command
     error_occurred = pyqtSignal(str)           # human-readable error message
     audio_level_changed = pyqtSignal(float)    # 0.0 – 1.0
 
@@ -85,9 +89,20 @@ class TrevoApp(QObject):
         self._context_detector: object = None  # type: ignore[assignment]
         self._command_parser: CommandParser = None  # type: ignore[assignment]
         self._conversation: ConversationEngine = None  # type: ignore[assignment]
+        self._agent: AgentOrchestrator = None  # type: ignore[assignment]
         self._language_manager: LanguageManager = None  # type: ignore[assignment]
         self._database: DatabaseManager = None  # type: ignore[assignment]
         self._knowledge: KnowledgeGraph = None  # type: ignore[assignment]
+
+        # Real-time interim STT
+        self._interim_audio: bytearray = bytearray()
+        self._interim_running: bool = False
+        self._interim_text: str = ""  # accumulated interim transcript
+
+        from PyQt6.QtCore import QTimer
+        self._interim_timer = QTimer(self)
+        self._interim_timer.setInterval(2500)  # recognise every 2.5 seconds
+        self._interim_timer.timeout.connect(self._on_interim_tick)
 
         # Initialise everything
         self._init_components()
@@ -191,6 +206,7 @@ class TrevoApp(QObject):
             api_key=conv_key or None,
             model=None,  # use defaults
             ollama_url=self._settings.polishing.ollama_url,
+            snippets=self._settings.snippets,
         )
 
         # --- Language Manager ------------------------------------------------
@@ -200,13 +216,7 @@ class TrevoApp(QObject):
         )
 
         # --- Hotkey Manager --------------------------------------------------
-        mode_str = self._settings.general.mode
-        dictation_mode = (
-            DictationMode.PUSH_TO_TALK
-            if mode_str == "push_to_talk"
-            else DictationMode.TOGGLE
-        )
-        self._hotkey_manager = HotkeyManager(mode=dictation_mode)
+        self._hotkey_manager = HotkeyManager()
         self._hotkey_manager.start()
 
         # --- Database / History ----------------------------------------------
@@ -217,6 +227,24 @@ class TrevoApp(QObject):
 
         # --- Knowledge Graph (Obsidian-style vault) --------------------------
         self._knowledge = KnowledgeGraph()
+
+        # --- TTS Engine (voice output) ----------------------------------------
+        from core.tts_engine import TTSManager
+        tts_config = {
+            "provider": self._settings.tts.provider,
+            "voice": self._settings.tts.voice,
+            "language": self._settings.tts.language,
+            "speaking_rate": self._settings.tts.speaking_rate,
+            "google_cloud_api_key": self._settings.tts.google_cloud_api_key,
+        }
+        self._tts = TTSManager(config=tts_config)
+
+        # --- Agent Mode (Phase 2 orchestrator) --------------------------------
+        agent_config = {
+            "groq_api_key": self._settings.polishing.groq_api_key or "",
+            "confirm_destructive": True,
+        }
+        self._agent = AgentOrchestrator(provider_config=agent_config)
 
         logger.info("All components initialised")
 
@@ -251,13 +279,30 @@ class TrevoApp(QObject):
 
         if engine_name == "google_cloud":
             from core.stt_google import GoogleCloudSTT
-            return GoogleCloudSTT(api_key=self._settings.stt.google_cloud_api_key)
+            # Load phrase hints for improved accuracy (custom words + defaults)
+            phrase_hints = self._get_phrase_hints()
+            return GoogleCloudSTT(
+                api_key=self._settings.stt.google_cloud_api_key,
+                phrase_hints=phrase_hints,
+            )
 
         # Unknown engine
         raise ValueError(
             f"Unknown STT engine: {engine_name}. "
             f"Supported: groq, gemini, google_cloud, openai, whisper_local"
         )
+
+    def _get_phrase_hints(self) -> list[str]:
+        """Collect phrase hints for STT from custom dictionary and defaults."""
+        hints: list[str] = ["Sidhanth", "Sidhanth Bibi", "Trevo", "PyQt", "Jarvis"]
+        # Load from database if available
+        try:
+            if hasattr(self, "_database") and self._database:
+                words = self._database.get_all_words()
+                hints.extend(w.word for w in words if w.word not in hints)
+        except Exception:
+            logger.debug("Could not load custom dictionary for phrase hints")
+        return hints
 
     # ------------------------------------------------------------------
     # Signal wiring
@@ -275,10 +320,8 @@ class TrevoApp(QObject):
         self._vad.speech_start.connect(self._on_speech_start)
         self._vad.speech_end.connect(self._on_speech_end)
 
-        # Hotkey events — real HotkeyManager signals
+        # Hotkey events — Right Ctrl tap toggle
         self._hotkey_manager.dictation_toggled.connect(self._on_dictation_toggled)
-        self._hotkey_manager.command_mode.connect(self._on_command_mode)
-        self._hotkey_manager.mute_toggled.connect(self._on_mute_toggled)
         self._hotkey_manager.cancelled.connect(self._on_cancelled)
 
     # ------------------------------------------------------------------
@@ -287,7 +330,21 @@ class TrevoApp(QObject):
 
     def _run_loop(self) -> None:
         asyncio.set_event_loop(self._loop)
-        self._loop.run_forever()
+
+        def _handle_exception(loop: asyncio.AbstractEventLoop, context: dict) -> None:
+            msg = context.get("message", "Unhandled async error")
+            exc = context.get("exception")
+            if exc:
+                logger.exception("Async error: {} — {}", msg, exc)
+            else:
+                logger.error("Async error: {}", msg)
+
+        self._loop.set_exception_handler(_handle_exception)
+
+        try:
+            self._loop.run_forever()
+        except Exception:
+            logger.exception("Async event loop crashed")
 
     def _run_async(self, coro: object) -> asyncio.Future:
         """Schedule a coroutine on the background loop and return its Future."""
@@ -320,28 +377,9 @@ class TrevoApp(QObject):
                 self.stop_recording()
 
     @pyqtSlot()
-    def _on_command_mode(self) -> None:
-        """Handle command mode activation from HotkeyManager."""
-        if self._state == AppState.IDLE:
-            self._set_state(AppState.COMMAND_MODE)
-            self._audio_capture.start()
-        elif self._state == AppState.COMMAND_MODE:
-            self._audio_capture.stop()
-            self._vad.reset()
-            self._set_state(AppState.IDLE)
-
-    @pyqtSlot()
-    def _on_mute_toggled(self) -> None:
-        """Handle mute toggle — stop recording without processing."""
-        if self._state == AppState.RECORDING:
-            self._audio_capture.stop()
-            self._vad.reset()
-            self._set_state(AppState.IDLE)
-            logger.info("Recording muted / discarded")
-
-    @pyqtSlot()
     def _on_cancelled(self) -> None:
         """Handle cancel — stop any active operation and return to idle."""
+        self._interim_timer.stop()
         if self._state == AppState.RECORDING:
             self._audio_capture.stop()
             self._vad.reset()
@@ -366,16 +404,23 @@ class TrevoApp(QObject):
         self._set_state(AppState.RECORDING)
         self._vad.reset()
 
+        # Reset interim STT state and start periodic recognition
+        self._interim_audio.clear()
+        self._interim_text = ""
+        self._interim_running = False
+        self._interim_timer.start()
+
         # Start the STT stream asynchronously
         self._run_async(self._stt_engine.start_stream())
         self._audio_capture.start()
-        logger.info("Recording started")
+        logger.info("Recording started (real-time STT enabled)")
 
     def stop_recording(self) -> None:
         """Stop voice capture and process any remaining audio."""
         if self._state != AppState.RECORDING:
             return
 
+        self._interim_timer.stop()
         self._audio_capture.stop()
         self._set_state(AppState.PROCESSING)
 
@@ -395,6 +440,8 @@ class TrevoApp(QObject):
         if self._state == AppState.RECORDING:
             # Stream audio to STT in real time
             self._run_async(self._stt_engine.send_audio(chunk))
+            # Accumulate for interim recognition
+            self._interim_audio.extend(chunk)
 
         if segment is not None:
             # A complete speech segment ended — could trigger batch STT
@@ -408,6 +455,41 @@ class TrevoApp(QObject):
     @pyqtSlot()
     def _on_speech_end(self) -> None:
         logger.debug("VAD: speech ended")
+
+    # ------------------------------------------------------------------
+    # Real-time interim STT
+    # ------------------------------------------------------------------
+
+    def _on_interim_tick(self) -> None:
+        """Periodically recognise accumulated audio for live transcript."""
+        if not self._interim_audio or self._interim_running:
+            return
+        if self._state != AppState.RECORDING:
+            return
+
+        audio_snapshot = bytes(self._interim_audio)
+        if len(audio_snapshot) < 16_000 * 2:  # need at least 1 second
+            return
+
+        self._interim_running = True
+        future = self._run_async(self._do_interim_recognize(audio_snapshot))
+        future.add_done_callback(self._on_interim_done)
+
+    async def _do_interim_recognize(self, audio_bytes: bytes) -> str:
+        """Run interim recognition on the background async loop."""
+        return await self._stt_engine.recognize_interim(audio_bytes)
+
+    def _on_interim_done(self, future: asyncio.Future) -> None:
+        """Handle interim recognition result."""
+        self._interim_running = False
+        try:
+            text = future.result()
+            if text and text != self._interim_text:
+                self._interim_text = text
+                self.interim_transcript_ready.emit(text)
+                logger.debug("Interim transcript: '{}'", text[:80])
+        except Exception:
+            logger.debug("Interim recognition callback error")
 
     # ------------------------------------------------------------------
     # Transcript finalisation
@@ -431,6 +513,13 @@ class TrevoApp(QObject):
             self.raw_transcript_ready.emit(raw_text)
             logger.info("Raw transcript: '{}'", raw_text[:120])
 
+            # Remove filler words before further processing
+            from utils.text_utils import remove_filler_words
+            cleaned_text = remove_filler_words(raw_text)
+            if cleaned_text != raw_text:
+                logger.debug("Filler removal: '{}' → '{}'", raw_text[:80], cleaned_text[:80])
+                raw_text = cleaned_text
+
             # Route through conversation engine — it handles intent detection,
             # polishing, transformation, replace, undo, everything.
             ctx = self._context_detector.get_active_context()
@@ -447,6 +536,10 @@ class TrevoApp(QObject):
             if result.message:
                 self.conversation_message.emit(result.message)
 
+            # Speak voice response via TTS if present (Trevo Mode)
+            if result.voice_response:
+                self.voice_response_ready.emit(result.voice_response)
+
             # Execute the result action
             if result.action == "inject_text" and result.text:
                 self._text_injector.inject(result.text)
@@ -455,7 +548,6 @@ class TrevoApp(QObject):
                 self._save_to_history(raw_text, result.text)
 
             elif result.action == "replace_all" and result.text:
-                # Select all in active field, then paste replacement
                 import pyautogui
                 pyautogui.hotkey("ctrl", "a")
                 await asyncio.sleep(0.05)
@@ -465,15 +557,25 @@ class TrevoApp(QObject):
                 self._save_to_history(raw_text, result.text)
 
             elif result.action == "read_back":
-                # Show the text in the UI (future: TTS)
                 self.transcript_ready.emit(result.text)
+                if result.voice_response:
+                    self.voice_response_ready.emit(result.voice_response)
+
+            elif result.action == "desktop_command" and result.text:
+                self.desktop_command_ready.emit(result.text)
+
+            elif result.action == "conversation":
+                # Pure conversation — no text to type, just voice response
+                pass
 
             elif result.action == "clear":
-                # Select all and delete
                 import pyautogui
                 pyautogui.hotkey("ctrl", "a")
                 await asyncio.sleep(0.05)
                 pyautogui.press("delete")
+
+            elif result.action == "morning_briefing":
+                self.conversation_message.emit("morning_briefing")
 
             # noop — do nothing
 

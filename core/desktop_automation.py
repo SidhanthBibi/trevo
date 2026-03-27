@@ -752,6 +752,69 @@ def run_system_command(command: str) -> AutomationResult:
         return AutomationResult(success=False, error=f"Command failed: {e}")
 
 
+class DesktopAutomation:
+    """High-level wrapper that routes natural language commands to the right function."""
+
+    # Pattern → handler mapping for natural language commands
+    _PATTERNS: list[tuple[str, str]] = [
+        (r"open\s+(.+)", "open_app"),
+        (r"launch\s+(.+)", "open_app"),
+        (r"start\s+(.+)", "open_app"),
+        (r"focus\s+(.+?)(?:\s+window)?$", "focus_window"),
+        (r"switch\s+to\s+(.+)", "focus_window"),
+        (r"minimize\s+(.+)", "minimize_window"),
+        (r"(?:what(?:'s| is)\s+my\s+)?ip(?:\s+address)?", "ip_address"),
+        (r"(?:disk|storage|drive)\s*(?:space|usage)?", "disk_space"),
+        (r"(?:system|computer|pc)\s*(?:info|status|stats)?", "system_info"),
+        (r"(?:ram|memory|cpu)\s*(?:usage)?", "system_info"),
+        (r"(?:battery)\s*(?:status|level)?", "system_info"),
+        (r"list\s+(?:all\s+)?windows", "list_windows"),
+        (r"(?:clipboard|paste)\s*(?:content)?", "get_clipboard"),
+    ]
+
+    def execute_natural_command(self, command_text: str) -> str:
+        """Parse a natural language command and execute the appropriate action.
+
+        Returns a human-readable result string.
+        """
+        import re
+        text = command_text.strip().lower()
+
+        for pattern, handler in self._PATTERNS:
+            match = re.search(pattern, text, re.IGNORECASE)
+            if match:
+                return self._dispatch(handler, match)
+
+        # Fallback: try to open it as an app
+        return self._dispatch("open_app", None, fallback_text=command_text)
+
+    def _dispatch(self, handler: str, match, fallback_text: str = "") -> str:
+        """Dispatch to the appropriate function and return result string."""
+        if handler == "open_app":
+            app_name = match.group(1).strip() if match else fallback_text
+            result = open_application(app_name)
+        elif handler == "focus_window":
+            result = focus_window(match.group(1).strip())
+        elif handler == "minimize_window":
+            result = minimize_window(match.group(1).strip())
+        elif handler == "ip_address":
+            result = get_ip_address()
+        elif handler == "disk_space":
+            result = get_disk_space()
+        elif handler == "system_info":
+            result = get_system_info()
+        elif handler == "list_windows":
+            result = list_windows()
+        elif handler == "get_clipboard":
+            result = get_clipboard()
+        else:
+            return f"Unknown command: {handler}"
+
+        if result.success:
+            return result.output
+        return result.error or f"Command failed: {handler}"
+
+
 def run_system_command_confirmed(command: str) -> AutomationResult:
     """Run a system command after user confirmation (bypasses whitelist)."""
     import shlex

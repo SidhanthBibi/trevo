@@ -53,6 +53,14 @@ class STTEngine(ABC):
         # Ensure the function is recognised as an async generator:
         yield  # pragma: no cover  # type: ignore[misc]
 
+    async def recognize_interim(self, audio_bytes: bytes) -> str:
+        """Quick recognition of raw int16 PCM audio for interim/partial results.
+
+        Default implementation returns empty string (no interim support).
+        Engines that support it should override this.
+        """
+        return ""
+
     @abstractmethod
     async def stop_stream(self) -> None:
         """Gracefully shut down the streaming session."""

@@ -603,13 +603,13 @@ class TranscriptViewer(QDialog):
         self._detail.setHtml(
             '<div style="font-family: system-ui, sans-serif; line-height: 1.6;">'
             '<table style="color: #a1a1aa; font-size: 12px; margin-bottom: 12px;">'
-            f'<tr><td style="padding-right:14px;"><b style="color:#8b5cf6;">Timestamp</b></td>'
+            f'<tr><td style="padding-right:14px;"><b style="color:#7C3AED;">Timestamp</b></td>'
             f'<td>{_escape_html(entry.timestamp.strftime("%Y-%m-%d %H:%M:%S"))}</td></tr>'
-            f'<tr><td><b style="color:#8b5cf6;">Language</b></td>'
+            f'<tr><td><b style="color:#7C3AED;">Language</b></td>'
             f'<td>{_escape_html(entry.language.upper())}</td></tr>'
-            f'<tr><td><b style="color:#8b5cf6;">Context</b></td>'
+            f'<tr><td><b style="color:#7C3AED;">Context</b></td>'
             f'<td>{_escape_html(entry.app_context or "N/A")}</td></tr>'
-            f'<tr><td><b style="color:#8b5cf6;">Duration</b></td>'
+            f'<tr><td><b style="color:#7C3AED;">Duration</b></td>'
             f'<td>{mins}:{secs:02d} ({entry.duration_seconds:.1f}s)</td></tr>'
             "</table>"
             '<hr style="border: none; border-top: 1px solid rgba(255,255,255,0.06); margin: 8px 0 12px 0;">'

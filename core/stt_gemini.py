@@ -160,6 +160,46 @@ class GeminiSTT(STTEngine):
         except Exception:
             logger.exception("Gemini STT failed")
 
+    async def recognize_interim(self, audio_bytes: bytes) -> str:
+        """Quick recognition for real-time interim results."""
+        if not audio_bytes or not self._api_key:
+            return ""
+
+        # Use last ~10 seconds for speed
+        max_bytes = 10 * 16_000 * 2
+        if len(audio_bytes) > max_bytes:
+            audio_bytes = audio_bytes[-max_bytes:]
+
+        try:
+            import httpx
+
+            wav_bytes = pcm_to_wav(audio_bytes)
+            audio_b64 = base64.b64encode(wav_bytes).decode("ascii")
+
+            payload = {
+                "contents": [{
+                    "parts": [
+                        {"text": "Transcribe this audio exactly. Return ONLY the text."},
+                        {"inline_data": {"mime_type": "audio/wav", "data": audio_b64}},
+                    ]
+                }]
+            }
+            url = f"{_ENDPOINT_BASE}{self._model}:generateContent?key={self._api_key}"
+            async with httpx.AsyncClient(timeout=10.0) as client:
+                resp = await client.post(url, json=payload)
+                resp.raise_for_status()
+                data = resp.json()
+
+            candidates = data.get("candidates", [])
+            if candidates:
+                parts = candidates[0].get("content", {}).get("parts", [])
+                if parts:
+                    return parts[0].get("text", "").strip()
+            return ""
+        except Exception as exc:
+            logger.debug("Gemini interim recognition failed: {}", exc)
+            return ""
+
     async def stop_stream(self) -> None:
         """End the current session and clear the buffer."""
         self._streaming = False

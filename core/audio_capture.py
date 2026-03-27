@@ -159,14 +159,16 @@ class AudioCapture(QObject):
         rms = self._compute_rms(indata)
         self.audio_level.emit(rms)
 
-        # Noise gate
+        # Always send audio to STT — noise gate only affects ring buffer storage
+        # This ensures quiet speech still reaches the speech-to-text engine
+        self.audio_chunk.emit(raw)
+
+        # Noise gate — only skip ring buffer storage for very quiet audio
         if rms < self._noise_gate_threshold:
             return
 
         with self._lock:
             self._ring_buffer.append(raw)
-
-        self.audio_chunk.emit(raw)
 
     @staticmethod
     def _compute_rms(samples: np.ndarray) -> float:

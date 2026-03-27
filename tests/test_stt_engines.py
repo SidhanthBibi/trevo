@@ -121,53 +121,6 @@ class TestSTTEngineInterface:
 
 
 # ---------------------------------------------------------------------------
-# DeepgramSTT initialization (mocked)
-# ---------------------------------------------------------------------------
-
-class TestDeepgramSTTInit:
-    """Test DeepgramSTT initialisation with mocked WebSocket."""
-
-    def test_deepgram_stt_init_with_mock(self):
-        """Verify a hypothetical DeepgramSTT stores its config correctly."""
-        # Since DeepgramSTT may not exist yet, we test the pattern it should follow
-        # by constructing a mock-based test that validates expected behaviour.
-        mock_ws_class = MagicMock()
-        mock_ws_instance = AsyncMock()
-        mock_ws_class.return_value = mock_ws_instance
-
-        # Simulate the expected interface of a DeepgramSTT-like engine
-        config = {
-            "api_key": "test-key-123",
-            "model": "nova-2",
-            "language": "en",
-            "sample_rate": 16000,
-        }
-
-        # The engine should store its configuration
-        assert config["api_key"] == "test-key-123"
-        assert config["model"] == "nova-2"
-        assert config["sample_rate"] == 16000
-
-    def test_deepgram_websocket_url_construction(self):
-        """Test that the Deepgram WebSocket URL is built correctly."""
-        base_url = "wss://api.deepgram.com/v1/listen"
-        params = {
-            "model": "nova-2",
-            "language": "en",
-            "punctuate": "true",
-            "interim_results": "true",
-            "encoding": "linear16",
-            "sample_rate": "16000",
-        }
-        query = "&".join(f"{k}={v}" for k, v in params.items())
-        url = f"{base_url}?{query}"
-
-        assert "nova-2" in url
-        assert "sample_rate=16000" in url
-        assert url.startswith("wss://")
-
-
-# ---------------------------------------------------------------------------
 # WhisperSTT initialization (mocked)
 # ---------------------------------------------------------------------------
 

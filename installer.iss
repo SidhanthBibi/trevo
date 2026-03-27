@@ -40,8 +40,8 @@ Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; GroupDescription: "{
 Name: "autostart"; Description: "Launch trevo when Windows starts"; GroupDescription: "Startup:"
 
 [Files]
-; Main executable (built by PyInstaller)
-Source: "dist\trevo.exe"; DestDir: "{app}"; Flags: ignoreversion
+; Entire PyInstaller onedir output (exe + all DLLs/libs including torch for speaker recognition)
+Source: "dist\trevo\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
 
 ; Assets
 Source: "ui\assets\*"; DestDir: "{app}\ui\assets"; Flags: ignoreversion recursesubdirs createallsubdirs
@@ -81,11 +81,14 @@ var
   PolishProviderCombo: TNewComboBox;
   PolishProviderDescLabel: TNewStaticText;
 
-  // API keys page
-  APIKeysPage: TWizardPage;
+  // API keys page 1 (free providers)
+  APIKeysPage1: TWizardPage;
   GroqKeyEdit: TNewEdit;
   GeminiKeyEdit: TNewEdit;
   GCloudKeyEdit: TNewEdit;
+
+  // API keys page 2 (paid providers)
+  APIKeysPage2: TWizardPage;
   OpenAIKeyEdit: TNewEdit;
   AnthropicKeyEdit: TNewEdit;
 
@@ -273,112 +276,170 @@ begin
   PolishProviderChanged(nil);
 
   // ==========================================================
-  //  PAGE 3: API Keys
+  //  PAGE 3: API Keys — Free Providers
   // ==========================================================
-  APIKeysPage := CreateCustomPage(
+  APIKeysPage1 := CreateCustomPage(
     PolishProviderPage.ID,
-    'API Keys',
-    'Enter your API keys below. You can always change these later in Settings.'
+    'API Keys — Free Providers',
+    'Enter your free-tier API keys. You can change these later in Settings.'
   );
 
-  TopPos := 0;
+  TopPos := 8;
 
-  // --- Groq (primary, prominent) ---
-  L := TNewStaticText.Create(APIKeysPage);
-  L.Parent := APIKeysPage.Surface;
-  L.Caption := 'Groq API Key  (Free — https://console.groq.com)';
+  // --- Groq ---
+  L := TNewStaticText.Create(APIKeysPage1);
+  L.Parent := APIKeysPage1.Surface;
+  L.Caption := 'Groq API Key  (Free — Recommended)';
   L.Top := TopPos;
   L.Left := 0;
   L.Font.Style := [fsBold];
   L.Font.Color := clGreen;
+  TopPos := TopPos + 22;
+
+  L := TNewStaticText.Create(APIKeysPage1);
+  L.Parent := APIKeysPage1.Surface;
+  L.Caption := 'Get your free key at: https://console.groq.com';
+  L.Top := TopPos;
+  L.Left := 0;
+  L.Font.Color := clGray;
   TopPos := TopPos + 20;
 
-  GroqKeyEdit := TNewEdit.Create(APIKeysPage);
-  GroqKeyEdit.Parent := APIKeysPage.Surface;
+  GroqKeyEdit := TNewEdit.Create(APIKeysPage1);
+  GroqKeyEdit.Parent := APIKeysPage1.Surface;
   GroqKeyEdit.Top := TopPos;
   GroqKeyEdit.Left := 0;
-  GroqKeyEdit.Width := APIKeysPage.SurfaceWidth;
+  GroqKeyEdit.Width := APIKeysPage1.SurfaceWidth;
   GroqKeyEdit.Text := '';
-  TopPos := TopPos + 36;
+  TopPos := TopPos + 42;
 
-  // --- Gemini (optional) ---
-  L := TNewStaticText.Create(APIKeysPage);
-  L.Parent := APIKeysPage.Surface;
-  L.Caption := 'Gemini API Key  (Optional — https://aistudio.google.com/apikey)';
+  // --- Gemini ---
+  L := TNewStaticText.Create(APIKeysPage1);
+  L.Parent := APIKeysPage1.Surface;
+  L.Caption := 'Gemini API Key  (Free — Google AI Studio)';
   L.Top := TopPos;
   L.Left := 0;
+  L.Font.Style := [fsBold];
+  TopPos := TopPos + 22;
+
+  L := TNewStaticText.Create(APIKeysPage1);
+  L.Parent := APIKeysPage1.Surface;
+  L.Caption := 'Get your free key at: https://aistudio.google.com/apikey';
+  L.Top := TopPos;
+  L.Left := 0;
+  L.Font.Color := clGray;
   TopPos := TopPos + 20;
 
-  GeminiKeyEdit := TNewEdit.Create(APIKeysPage);
-  GeminiKeyEdit.Parent := APIKeysPage.Surface;
+  GeminiKeyEdit := TNewEdit.Create(APIKeysPage1);
+  GeminiKeyEdit.Parent := APIKeysPage1.Surface;
   GeminiKeyEdit.Top := TopPos;
   GeminiKeyEdit.Left := 0;
-  GeminiKeyEdit.Width := APIKeysPage.SurfaceWidth;
+  GeminiKeyEdit.Width := APIKeysPage1.SurfaceWidth;
   GeminiKeyEdit.Text := '';
-  TopPos := TopPos + 36;
+  TopPos := TopPos + 42;
 
-  // --- Google Cloud (optional) ---
-  L := TNewStaticText.Create(APIKeysPage);
-  L.Parent := APIKeysPage.Surface;
-  L.Caption := 'Google Cloud API Key  (Optional — https://console.cloud.google.com)';
+  // --- Google Cloud ---
+  L := TNewStaticText.Create(APIKeysPage1);
+  L.Parent := APIKeysPage1.Surface;
+  L.Caption := 'Google Cloud API Key  (Optional — for TTS voices)';
   L.Top := TopPos;
   L.Left := 0;
+  L.Font.Style := [fsBold];
+  TopPos := TopPos + 22;
+
+  L := TNewStaticText.Create(APIKeysPage1);
+  L.Parent := APIKeysPage1.Surface;
+  L.Caption := 'Get key at: https://console.cloud.google.com (1M free chars/month)';
+  L.Top := TopPos;
+  L.Left := 0;
+  L.Font.Color := clGray;
   TopPos := TopPos + 20;
 
-  GCloudKeyEdit := TNewEdit.Create(APIKeysPage);
-  GCloudKeyEdit.Parent := APIKeysPage.Surface;
+  GCloudKeyEdit := TNewEdit.Create(APIKeysPage1);
+  GCloudKeyEdit.Parent := APIKeysPage1.Surface;
   GCloudKeyEdit.Top := TopPos;
   GCloudKeyEdit.Left := 0;
-  GCloudKeyEdit.Width := APIKeysPage.SurfaceWidth;
+  GCloudKeyEdit.Width := APIKeysPage1.SurfaceWidth;
   GCloudKeyEdit.Text := '';
-  TopPos := TopPos + 36;
 
-  // --- OpenAI (optional) ---
-  L := TNewStaticText.Create(APIKeysPage);
-  L.Parent := APIKeysPage.Surface;
-  L.Caption := 'OpenAI API Key  (Optional — https://platform.openai.com)';
+  // ==========================================================
+  //  PAGE 4: API Keys — Paid Providers (Optional)
+  // ==========================================================
+  APIKeysPage2 := CreateCustomPage(
+    APIKeysPage1.ID,
+    'API Keys — Paid Providers (Optional)',
+    'Only fill these if you want to use OpenAI or Anthropic. Skip if unsure.'
+  );
+
+  TopPos := 8;
+
+  // --- OpenAI ---
+  L := TNewStaticText.Create(APIKeysPage2);
+  L.Parent := APIKeysPage2.Surface;
+  L.Caption := 'OpenAI API Key';
   L.Top := TopPos;
   L.Left := 0;
+  L.Font.Style := [fsBold];
+  TopPos := TopPos + 22;
+
+  L := TNewStaticText.Create(APIKeysPage2);
+  L.Parent := APIKeysPage2.Surface;
+  L.Caption := 'https://platform.openai.com — Requires billing enabled';
+  L.Top := TopPos;
+  L.Left := 0;
+  L.Font.Color := clGray;
   TopPos := TopPos + 20;
 
-  OpenAIKeyEdit := TNewEdit.Create(APIKeysPage);
-  OpenAIKeyEdit.Parent := APIKeysPage.Surface;
+  OpenAIKeyEdit := TNewEdit.Create(APIKeysPage2);
+  OpenAIKeyEdit.Parent := APIKeysPage2.Surface;
   OpenAIKeyEdit.Top := TopPos;
   OpenAIKeyEdit.Left := 0;
-  OpenAIKeyEdit.Width := APIKeysPage.SurfaceWidth;
+  OpenAIKeyEdit.Width := APIKeysPage2.SurfaceWidth;
   OpenAIKeyEdit.Text := '';
-  TopPos := TopPos + 36;
+  TopPos := TopPos + 50;
 
-  // --- Anthropic (optional) ---
-  L := TNewStaticText.Create(APIKeysPage);
-  L.Parent := APIKeysPage.Surface;
-  L.Caption := 'Anthropic API Key  (Optional — https://console.anthropic.com)';
+  // --- Anthropic ---
+  L := TNewStaticText.Create(APIKeysPage2);
+  L.Parent := APIKeysPage2.Surface;
+  L.Caption := 'Anthropic API Key';
   L.Top := TopPos;
   L.Left := 0;
+  L.Font.Style := [fsBold];
+  TopPos := TopPos + 22;
+
+  L := TNewStaticText.Create(APIKeysPage2);
+  L.Parent := APIKeysPage2.Surface;
+  L.Caption := 'https://console.anthropic.com — Requires billing enabled';
+  L.Top := TopPos;
+  L.Left := 0;
+  L.Font.Color := clGray;
   TopPos := TopPos + 20;
 
-  AnthropicKeyEdit := TNewEdit.Create(APIKeysPage);
-  AnthropicKeyEdit.Parent := APIKeysPage.Surface;
+  AnthropicKeyEdit := TNewEdit.Create(APIKeysPage2);
+  AnthropicKeyEdit.Parent := APIKeysPage2.Surface;
   AnthropicKeyEdit.Top := TopPos;
   AnthropicKeyEdit.Left := 0;
-  AnthropicKeyEdit.Width := APIKeysPage.SurfaceWidth;
+  AnthropicKeyEdit.Width := APIKeysPage2.SurfaceWidth;
   AnthropicKeyEdit.Text := '';
-  TopPos := TopPos + 36;
+  TopPos := TopPos + 50;
 
-  // --- Test Connection note ---
-  L := TNewStaticText.Create(APIKeysPage);
-  L.Parent := APIKeysPage.Surface;
-  L.Caption := 'You can test your API connections after install from Settings.';
+  // --- Skip note ---
+  L := TNewStaticText.Create(APIKeysPage2);
+  L.Parent := APIKeysPage2.Surface;
+  L.Caption := 'These are optional. trevo works great with just the free Groq + Gemini keys.'#13#10 +
+               'You can always add these later in the app Settings.';
   L.Top := TopPos;
   L.Left := 0;
+  L.Width := APIKeysPage2.SurfaceWidth;
+  L.AutoSize := True;
+  L.WordWrap := True;
   L.Font.Color := clGray;
   L.Font.Style := [fsItalic];
 
   // ==========================================================
-  //  PAGE 4: Memory Vault
+  //  PAGE 5: Memory Vault
   // ==========================================================
   VaultPage := CreateCustomPage(
-    APIKeysPage.ID,
+    APIKeysPage2.ID,
     'Memory Vault',
     'Choose where trevo stores your voice notes, transcripts, and knowledge files.'
   );
@@ -526,18 +587,17 @@ var
 begin
   Result := True;
 
-  if CurPageID = APIKeysPage.ID then
+  // Validate free provider keys on page 1
+  if CurPageID = APIKeysPage1.ID then
   begin
     Engine := GetSpeechEngineValue();
     Provider := GetPolishProviderValue();
 
-    // Check if user picked a cloud STT engine but gave no key
     if (Engine = 'groq') and (GroqKeyEdit.Text = '') then
     begin
       if MsgBox(
-        'You selected Groq for speech recognition but did not enter a Groq API key.'#13#10#13#10 +
-        'trevo will not be able to transcribe speech without it.'#13#10 +
-        'Continue anyway? (You can add the key later in Settings.)',
+        'You selected Groq for speech but did not enter a key.'#13#10#13#10 +
+        'trevo needs this key to work. Continue anyway?',
         mbConfirmation, MB_YESNO
       ) = IDNO then
         Result := False;
@@ -545,8 +605,7 @@ begin
     else if (Engine = 'gemini') and (GeminiKeyEdit.Text = '') then
     begin
       if MsgBox(
-        'You selected Gemini for speech recognition but did not enter a Gemini API key.'#13#10#13#10 +
-        'Continue anyway?',
+        'You selected Gemini for speech but did not enter a key. Continue anyway?',
         mbConfirmation, MB_YESNO
       ) = IDNO then
         Result := False;
@@ -554,55 +613,39 @@ begin
     else if (Engine = 'google_cloud') and (GCloudKeyEdit.Text = '') then
     begin
       if MsgBox(
-        'You selected Google Cloud for speech recognition but did not enter a Google Cloud API key.'#13#10#13#10 +
-        'Continue anyway?',
-        mbConfirmation, MB_YESNO
-      ) = IDNO then
-        Result := False;
-    end
-    else if (Engine = 'openai') and (OpenAIKeyEdit.Text = '') then
-    begin
-      if MsgBox(
-        'You selected OpenAI for speech recognition but did not enter an OpenAI API key.'#13#10#13#10 +
-        'Continue anyway?',
+        'You selected Google Cloud STT but did not enter a key. Continue anyway?',
         mbConfirmation, MB_YESNO
       ) = IDNO then
         Result := False;
     end;
+  end;
 
-    // Check polishing provider key
-    if Result and (Provider = 'groq') and (GroqKeyEdit.Text = '') then
+  // Validate paid provider keys on page 2
+  if CurPageID = APIKeysPage2.ID then
+  begin
+    Engine := GetSpeechEngineValue();
+    Provider := GetPolishProviderValue();
+
+    if (Engine = 'openai') and (OpenAIKeyEdit.Text = '') then
     begin
       if MsgBox(
-        'You selected Groq for text polishing but did not enter a Groq API key.'#13#10#13#10 +
-        'Continue anyway?',
+        'You selected OpenAI for speech but did not enter a key. Continue anyway?',
         mbConfirmation, MB_YESNO
       ) = IDNO then
         Result := False;
     end
-    else if Result and (Provider = 'gemini') and (GeminiKeyEdit.Text = '') then
+    else if (Provider = 'openai') and (OpenAIKeyEdit.Text = '') then
     begin
       if MsgBox(
-        'You selected Gemini for text polishing but did not enter a Gemini API key.'#13#10#13#10 +
-        'Continue anyway?',
+        'You selected OpenAI for polishing but did not enter a key. Continue anyway?',
         mbConfirmation, MB_YESNO
       ) = IDNO then
         Result := False;
     end
-    else if Result and (Provider = 'openai') and (OpenAIKeyEdit.Text = '') then
+    else if (Provider = 'anthropic') and (AnthropicKeyEdit.Text = '') then
     begin
       if MsgBox(
-        'You selected OpenAI for text polishing but did not enter an OpenAI API key.'#13#10#13#10 +
-        'Continue anyway?',
-        mbConfirmation, MB_YESNO
-      ) = IDNO then
-        Result := False;
-    end
-    else if Result and (Provider = 'anthropic') and (AnthropicKeyEdit.Text = '') then
-    begin
-      if MsgBox(
-        'You selected Anthropic for text polishing but did not enter an Anthropic API key.'#13#10#13#10 +
-        'Continue anyway?',
+        'You selected Anthropic for polishing but did not enter a key. Continue anyway?',
         mbConfirmation, MB_YESNO
       ) = IDNO then
         Result := False;
